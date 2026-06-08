@@ -45,7 +45,7 @@ python3 server.py             # 起本地看板 http://127.0.0.1:8787
 - **采集只增不改：** `collect.py` 用 `INSERT OR IGNORE`（id = sha1(source_key+url)），重跑**绝不**
   覆盖你的 score/tags/status/comment。要更新已有 item 的内容字段需另写逻辑，别动这条默认。
 - **加一个新源 = 在 `collect.py` 写个 adapter + 在 `sources.yml` 把 `adapter:` 从 null 改成它。**
-  15 个源现在是 `adapter: null`（真实但没接），它们是最自然的下一批后端任务（见 `docs/SOURCES.md`）。
+  12 个源现在是 `adapter: null`（真实但没接），它们是最自然的下一批后端任务（见 `docs/SOURCES.md`）。
 - **状态词固定**：`captured` / `reviewed` / `promoted` / `ignored`。别造新状态。
 - **语言默认中文**（README / docs / 注释 / 讨论模板），状态枚举、命令、路径、代码标识符保留英文。
 - **降级源不要追**：`gemini-changelog` / `meta-ai-blog` / `perplexity-changelog` 当前抓不到
@@ -54,10 +54,11 @@ python3 server.py             # 起本地看板 http://127.0.0.1:8787
 ## 当前状态（截至 2026-06-08，初始化完成）
 
 ✅ 已搭好并实测跑通：
-- `collect.py`：16 个源接通（generic_feed RSS/Atom + hf_daily_papers / hn_algolia / ossinsight /
-  yc_launches / hf_models / github_releases）。fetch 与 parse 已分离（每个 `parse_*` 是可脱网单测的纯
+- `collect.py`：19 个源接通（generic_feed RSS/Atom + hf_daily_papers / hn_algolia / ossinsight /
+  yc_launches / hf_models / github_releases + 3 个标准库 HTML 源 claude_release_notes /
+  mistral_changelog / a16z_portfolio）。fetch 与 parse 已分离（每个 `parse_*` 是可脱网单测的纯
   函数），`tests/` 下有标准库 unittest 套件（零网络、fixture 驱动）锁住 INSERT-OR-IGNORE 不变量。
-  带重试，单源失败不影响整体。
+  带重试，单源失败不影响整体。HTML 源只用标准库正则解析（无 bs4/lxml），结构变样时返回 `[]` 不崩。
 - `server.py`：`/api/stats` `/api/sources` `/api/items`（过滤/排序）+ 写接口（triage / 生成讨论 /
   回填 / 记灵感）全部 curl 验证通过。
 - `web/`：**占位前端**，能把上面闭环完整跑一遍，但视觉和交互是临时的。

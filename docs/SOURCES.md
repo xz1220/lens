@@ -13,7 +13,7 @@
   - `blocked` —— 当前抓不到（OAuth 墙 / bot 拦截），已降级不追
 - **adapter** —— `collect.py` 里负责采它的 handler；`null` = 源是真的、采集还没接（最自然的下一批任务）。
 
-当前 **16 个已接通**（adapter 非 null 且 status=ok），**15 个待接**。
+当前 **19 个已接通**（adapter 非 null 且 status=ok），**12 个待接**。
 
 ## P0 · 机器优先源（15）
 
@@ -23,11 +23,11 @@
 | Anthropic Newsroom | `anthropic.com/news` | html | needs_parse | — | 内嵌 JSON，无 RSS |
 | Anthropic Engineering | `anthropic.com/engineering` | html | needs_parse | — | 同上，工程向 |
 | Anthropic Research | `anthropic.com/research` | html | needs_parse | — | 同上，研究向 |
-| Claude Release Notes | `support.claude.com/.../release-notes` | html | ok | — | 服务端渲染可抓 |
+| Claude Release Notes | `support.claude.com/.../release-notes` | html | ok | claude_release_notes | 服务端渲染，按日期 h3 切条（HTML 抓取，结构变动可能失效）|
 | Gemini API Changelog | `ai.google.dev/.../changelog` | html | **blocked** | — | 跳 OAuth，降级不追 |
 | DeepMind Blog | `deepmind.google/blog/rss.xml` | rss | ok | generic_feed | 官方 RSS（调研中发现）|
 | Meta AI Blog | `ai.meta.com/blog` | html | **blocked** | — | 400，降级不追 |
-| Mistral Changelog | `docs.mistral.ai/resources/changelogs` | html | ok | — | docs changelog 可抓 |
+| Mistral Changelog | `docs.mistral.ai/resources/changelogs` | html | ok | mistral_changelog | docs changelog，按 data-changelog-entry 切条（HTML 抓取，结构变动可能失效）|
 | Vercel Changelog | `vercel.com/atom` | atom | ok | generic_feed | 官方 Atom |
 | Perplexity Changelog | `perplexity.ai/changelog` | html | **blocked** | — | 403 Cloudflare，降级不追 |
 | arXiv (cs.CL/LG/AI) | `rss.arxiv.org/rss/cs.CL` | rss | ok | generic_feed | 三个子类，原始日更，噪声高 |
@@ -53,7 +53,7 @@
 | alphaXiv | `alphaxiv.org` | html | needs_parse | — | arXiv 讨论层 |
 | HF Trending | `huggingface.co/papers/trending` | json | ok | — | 验证代码/benchmark |
 | YC Companies | `ycombinator.com/companies` | html | needs_headless | — | Algolia，需 headless |
-| a16z Portfolio | `a16z.com/portfolio/` | html | ok | — | 服务端渲染可抓，偏营销 |
+| a16z Portfolio | `a16z.com/portfolio/` | html | ok | a16z_portfolio | 服务端渲染，data-company 内嵌 JSON（HTML 抓取，结构变动可能失效）|
 
 ## heat · 发现候选源（6）
 
@@ -72,5 +72,6 @@
 2. 在 `sources.yml` 把那条源的 `adapter:` 从 `null` 改成你的 adapter 名。
 3. `python3 collect.py --source <key>` 验证。
 
-最自然的下一批：把 `needs_parse` 的几个（Anthropic 三博客解析 `__NEXT_DATA__`、Claude release notes /
-Mistral / a16z 的 HTML 抓取）和已 `ok` 但没接的 JSON 源（HF Hub、GitHub releases、HF trending）接上。
+已接：Loop 1 接了 HF Hub / GitHub releases 等 JSON 源；Loop 2 接了 Claude release notes / Mistral /
+a16z 三个 SSR HTML 源（标准库解析）。最自然的下一批：`needs_parse` 的 Anthropic 三博客（解析
+`__NEXT_DATA__` 内嵌 JSON）、已 `ok` 但没接的 `hf-trending` JSON、`sec-edgar-api`（需查询设计）。

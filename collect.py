@@ -31,6 +31,7 @@ import urllib.request
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+from urllib.parse import urljoin
 from xml.etree import ElementTree as ET
 
 import yaml
@@ -44,6 +45,13 @@ DEFAULT_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 lens-collector"
 )
+
+# Canonical entry points for the server-rendered HTML sources — used as the
+# parse functions' default base (for building absolute urls / anchors) so tests
+# can call them without a src dict; adapt_* always passes the live src["url"].
+CLAUDE_RELEASE_URL = "https://support.claude.com/en/articles/12138966-release-notes"
+MISTRAL_CHANGELOG_URL = "https://docs.mistral.ai/resources/changelogs"
+A16Z_PORTFOLIO_URL = "https://a16z.com/portfolio/"
 
 
 # --------------------------------------------------------------------------- #
@@ -126,6 +134,40 @@ def item_id(source_key: str, url: str) -> str:
 
 def localname(tag: str) -> str:
     return tag.split("}", 1)[-1] if "}" in tag else tag
+
+
+# --- stdlib-only HTML scraping helpers (no bs4/lxml) ------------------------- #
+def _html_text(raw) -> str:
+    """Decode an already-fetched HTML body to str. None / odd scalar -> ''."""
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8", "replace")
+    if isinstance(raw, str):
+        return raw
+    return ""
+
+
+def _attr(attrs: str, name: str) -> str:
+    """Pull one attribute value out of a tag's raw attribute string. '' if absent."""
+    m = (re.search(rf'{name}\s*=\s*"([^"]*)"', attrs or "")
+         or re.search(rf"{name}\s*=\s*'([^']*)'", attrs or ""))
+    return m.group(1) if m else ""
+
+
+def _human_date(text: str) -> str:
+    """'June 2, 2026' / 'Jun 2, 2026' -> '2026-06-02'. '' when it doesn't match."""
+    text = (text or "").strip()
+    for fmt in ("%B %d, %Y", "%b %d, %Y"):
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return ""
+
+
+def _iso_date(raw) -> str:
+    """Lift a bare YYYY-MM-DD out of a date-ish value ('2011-07-22 00:00:00')."""
+    m = re.search(r"\d{4}-\d{2}-\d{2}", str(raw or ""))
+    return m.group(0) if m else ""
 
 
 # --------------------------------------------------------------------------- #
@@ -409,6 +451,140 @@ def adapt_github_releases(src: dict) -> list[dict]:
     return out
 
 
+# --------------------------------------------------------------------------- #
+# HTML adapters — server-rendered pages, parsed with the stdlib only (regex over
+# already-fetched bytes; no bs4/lxml). Each is defensive: an unrecognized layout
+# yields [] instead of throwing, so a site redesign degrades to "0 new" not a
+# crash. The page shape can change at any time — these will need re-checking.
+# --------------------------------------------------------------------------- #
+def parse_claude_release_notes(raw, base_url: str = CLAUDE_RELEASE_URL) -> list[dict]:
+    """Claude release-notes article -> one record per dated <h3> section.
+
+    The article body is split on its date headings (`<h3 id=...>June 2, 2026</h3>`);
+    each `id` becomes a #anchor and the text between this heading and the next
+    (h2 or h3) becomes the summary. A heading only counts as an entry when its
+    text actually parses as a date — a non-release <h3> ("Frequently asked
+    questions", a footer label) is ignored, never turned into a row. If no dated
+    heading is found we return [] rather than inventing a whole-page record:
+    structureless / error / non-release HTML must not become a saved-looking
+    product item. Never raises, never invents data.
+    """
+    text = _html_text(raw)
+    if not text.strip():
+        return []
+    art = re.search(r"(?is)<article\b[^>]*>(.*?)</article>", text)
+    body = art.group(1) if art else text
+    heads = list(re.finditer(r"(?is)<(h2|h3)\b([^>]*)>(.*?)</\1>", body))
+    out: list[dict] = []
+    for i, m in enumerate(heads):
+        if m.group(1).lower() != "h3":  # h2 = month divider, boundary only
+            continue
+        date_text = strip_html(m.group(3), limit=200)
+        iso = _human_date(date_text)
+        if not iso:  # only genuinely dated headings are release-note entries
+            continue
+        anchor = _attr(m.group(2), "id")
+        end = heads[i + 1].start() if i + 1 < len(heads) else len(body)
+        out.append({
+            "title": date_text,
+            "url": base_url + (f"#{anchor}" if anchor else ""),
+            "summary": strip_html(body[m.end():end]),
+            "author": "",
+            "published_at": iso,
+            "category": "product",
+        })
+    return out
+
+
+def adapt_claude_release_notes(src: dict) -> list[dict]:
+    return parse_claude_release_notes(fetch(src["url"], ua=src.get("ua")), src["url"])
+
+
+def parse_mistral_changelog(raw, base_url: str = MISTRAL_CHANGELOG_URL) -> list[dict]:
+    """Mistral docs changelog -> one record per dated entry.
+
+    An entry is a div carrying BOTH `data-changelog-entry="true"` and
+    `id="date-YYYY-MM-DD"` (attribute order doesn't matter); the id yields the
+    date + #anchor, and it wraps an <h2> label and an <article> body. Requiring
+    the data- marker means a plain `<div id="date-...">` elsewhere on the page,
+    or a redesign that drops the flag, is NOT mistaken for a changelog row. The
+    block runs from one entry div to the next. Unknown structure / empty input -> [].
+    """
+    text = _html_text(raw)
+    if not text.strip():
+        return []
+    entries = []  # (match, date) for each genuine changelog-entry div
+    for m in re.finditer(r"(?is)<div\b([^>]*)>", text):
+        attrs = m.group(1)
+        if _attr(attrs, "data-changelog-entry") != "true":
+            continue
+        dm = re.match(r"date-(\d{4}-\d{2}-\d{2})$", _attr(attrs, "id"))
+        if not dm:
+            continue
+        entries.append((m, dm.group(1)))
+    out: list[dict] = []
+    for i, (m, date) in enumerate(entries):
+        end = entries[i + 1][0].start() if i + 1 < len(entries) else len(text)
+        block = text[m.end():end]
+        h2 = re.search(r"(?is)<h2\b[^>]*>(.*?)</h2>", block)
+        label = strip_html(h2.group(1), limit=200) if h2 else ""
+        art = re.search(r"(?is)<article\b[^>]*>(.*?)</article>", block)
+        out.append({
+            "title": f"{label}, {date[:4]}" if label else date,
+            "url": f"{base_url}#date-{date}",
+            "summary": strip_html(art.group(1) if art else block),
+            "author": "",
+            "published_at": date,
+            "category": "api_change",
+        })
+    return out
+
+
+def adapt_mistral_changelog(src: dict) -> list[dict]:
+    return parse_mistral_changelog(fetch(src["url"], ua=src.get("ua")), src["url"])
+
+
+def parse_a16z_portfolio(raw, base_url: str = A16Z_PORTFOLIO_URL) -> list[dict]:
+    """a16z portfolio -> one record per server-rendered company.
+
+    Each card carries its data as JSON in a `data-company='{...}'` attribute
+    (single-quoted, or entity-encoded inside double quotes). Each blob is parsed
+    independently: a malformed one is skipped, not fatal. Relative permalinks are
+    absolutized against base_url. Unknown structure / empty input -> [].
+    """
+    text = _html_text(raw)
+    if not text.strip():
+        return []
+    out: list[dict] = []
+    for m in re.finditer(r"(?is)data-company=(['\"])(.*?)\1", text):
+        try:
+            obj = json.loads(html.unescape(m.group(2)))
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(obj, dict):
+            continue
+        title = _as_str(obj.get("name") or obj.get("post_title") or obj.get("display_name"))
+        link = _as_str(obj.get("permalink") or obj.get("company_url")
+                       or obj.get("url") or obj.get("external_url"))
+        url = urljoin(base_url, link) if link else ""
+        if not title and not url:
+            continue
+        date = _iso_date(obj.get("investment_date")) or _iso_date(obj.get("initial_a16z_date_funded"))
+        out.append({
+            "title": title,
+            "url": url,
+            "summary": strip_html(obj.get("website_description") or obj.get("overview")),
+            "author": "",
+            "published_at": date or None,
+            "category": "funding",
+        })
+    return out
+
+
+def adapt_a16z_portfolio(src: dict) -> list[dict]:
+    return parse_a16z_portfolio(fetch(src["url"], ua=src.get("ua")), src["url"])
+
+
 ADAPTERS = {
     "generic_feed": adapt_generic_feed,
     "hf_daily_papers": adapt_hf_daily_papers,
@@ -417,6 +593,9 @@ ADAPTERS = {
     "yc_launches": adapt_yc_launches,
     "hf_models": adapt_hf_models,
     "github_releases": adapt_github_releases,
+    "claude_release_notes": adapt_claude_release_notes,
+    "mistral_changelog": adapt_mistral_changelog,
+    "a16z_portfolio": adapt_a16z_portfolio,
 }
 
 

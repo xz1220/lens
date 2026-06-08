@@ -17,7 +17,7 @@ meta:
   verified_on: "2026-06-05"
   provenance: "life-os: intake/topics/ai-and-ai-agent/research/2026-06-05-workflow.md"
   total: 31
-  wired_adapters: [generic_feed, hf_daily_papers, hn_algolia, ossinsight, yc_launches, hf_models, github_releases]
+  wired_adapters: [generic_feed, hf_daily_papers, hn_algolia, ossinsight, yc_launches, hf_models, github_releases, claude_release_notes, mistral_changelog, a16z_portfolio]
 
 sources:
   # ---------- P0: machine-first primary ----------
@@ -67,9 +67,9 @@ sources:
     category: product
     url: https://support.claude.com/en/articles/12138966-release-notes
     method: html
-    adapter: null
+    adapter: claude_release_notes
     status: ok
-    notes: 服务端渲染（Zendesk），可直接 HTML 抓；无 RSS。
+    notes: 服务端渲染（Zendesk），可直接 HTML 抓；无 RSS。按日期 h3 切条，标准库正则解析——结构变动可能失效。
 
   - key: gemini-changelog
     name: Gemini API Changelog
@@ -107,9 +107,9 @@ sources:
     category: api_change
     url: https://docs.mistral.ai/resources/changelogs
     method: html
-    adapter: null
+    adapter: mistral_changelog
     status: ok
-    notes: docs changelog 服务端渲染，可抓。
+    notes: docs changelog 服务端渲染，可抓。按 data-changelog-entry / id="date-YYYY-MM-DD" 切条，标准库正则解析——结构变动可能失效。
 
   - key: vercel-changelog
     name: Vercel Changelog
@@ -274,9 +274,9 @@ sources:
     category: funding
     url: https://a16z.com/portfolio/
     method: html
-    adapter: null
+    adapter: a16z_portfolio
     status: ok
-    notes: 服务端渲染可抓；只覆盖自家投资，偏营销。
+    notes: 服务端渲染可抓；只覆盖自家投资，偏营销。公司数据内嵌 data-company JSON，标准库正则+json 解析——结构变动可能失效。
 
   # ---------- heat: discovery candidates ----------
   - key: hn-algolia

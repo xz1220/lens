@@ -378,6 +378,169 @@ class TestParseGithubReleases(unittest.TestCase):
         self.assertEqual(recs[0]["summary"], "99")
 
 
+# --------------------------------------------------------------------------- #
+# HTML adapters (Loop 2) — parsed off trimmed local fixtures, no network.
+# --------------------------------------------------------------------------- #
+class TestParseClaudeReleaseNotes(unittest.TestCase):
+    def test_basic(self):
+        recs = collect.parse_claude_release_notes(fx_bytes("claude_release_notes.html"))
+        # Two dated <h3> entries; the month <h2> dividers and footer <h3> are not entries.
+        self.assertEqual(len(recs), 2)
+        first = recs[0]
+        self.assertEqual(first["title"], "June 2, 2026")
+        self.assertEqual(first["category"], "product")
+        self.assertEqual(first["published_at"], "2026-06-02")  # human date normalized
+        # url is absolute and carries the heading's #anchor.
+        self.assertTrue(first["url"].startswith("https://"))
+        self.assertTrue(first["url"].endswith("#h_f49ce4f650"))
+        # summary is the text between this h3 and the next heading, html stripped.
+        self.assertNotIn("<", first["summary"])
+        self.assertIn("custom roles", first["summary"])
+        # ...and it stops at the next month divider (no May content bleeding in).
+        self.assertNotIn("Opus", first["summary"])
+
+    def test_second_entry_and_entities(self):
+        recs = collect.parse_claude_release_notes(fx_bytes("claude_release_notes.html"))
+        second = recs[1]
+        self.assertEqual(second["title"], "May 28, 2026")
+        self.assertEqual(second["published_at"], "2026-05-28")
+        self.assertTrue(second["url"].endswith("#h_a467350ea5"))
+        self.assertIn("Opus 4.8", second["summary"])
+        self.assertIn("coding & reasoning", second["summary"])  # &amp; / &#8217; decoded
+        self.assertIn("’", second["summary"])  # right single quote
+
+    def test_non_release_or_structureless_html_returns_empty(self):
+        # Defensive: structureless / non-release HTML must NOT become a
+        # saved-looking product record — it returns [] (never invents data).
+        # An error page with no date heading:
+        self.assertEqual(
+            collect.parse_claude_release_notes(b"<html><body><p>Access denied</p></body></html>"), []
+        )
+        # An <article> whose only <h3> is NOT a date (e.g. an FAQ) is not an entry:
+        self.assertEqual(
+            collect.parse_claude_release_notes(
+                b"<article><h3>Frequently asked questions</h3><p>Not a dated release note.</p></article>"
+            ),
+            [],
+        )
+        # Body text but no date heading at all -> still [], not a whole-page row:
+        self.assertEqual(
+            collect.parse_claude_release_notes(
+                b"<html><head><title>Claude Release Notes</title></head>"
+                b"<body><p>Some notes text.</p></body></html>"
+            ),
+            [],
+        )
+
+    def test_empty_and_malformed_return_empty(self):
+        self.assertEqual(collect.parse_claude_release_notes(b""), [])
+        self.assertEqual(collect.parse_claude_release_notes(None), [])
+        self.assertEqual(collect.parse_claude_release_notes(123), [])  # non-bytes scalar
+        # Markup with no text content degrades to [] (nothing to show).
+        self.assertEqual(collect.parse_claude_release_notes(b"<html><body></body></html>"), [])
+
+    def test_base_url_override(self):
+        recs = collect.parse_claude_release_notes(
+            fx_bytes("claude_release_notes.html"), base_url="https://example.test/notes"
+        )
+        self.assertTrue(recs[0]["url"].startswith("https://example.test/notes#"))
+
+
+class TestParseMistralChangelog(unittest.TestCase):
+    def test_basic(self):
+        recs = collect.parse_mistral_changelog(fx_bytes("mistral_changelog.html"))
+        self.assertEqual(len(recs), 2)  # two dated entries; footer h3s are not entries
+        first = recs[0]
+        self.assertEqual(first["title"], "May 28, 2026")  # h2 label + year from the id
+        self.assertEqual(first["category"], "api_change")
+        self.assertEqual(first["published_at"], "2026-05-28")  # straight from id="date-..."
+        self.assertEqual(first["author"], "")
+        self.assertTrue(first["url"].startswith("https://"))
+        self.assertTrue(first["url"].endswith("#date-2026-05-28"))
+        self.assertNotIn("<", first["summary"])
+        self.assertIn("Vibe", first["summary"])
+        self.assertNotIn("April", first["summary"])  # next entry didn't bleed in
+
+    def test_second_entry(self):
+        recs = collect.parse_mistral_changelog(fx_bytes("mistral_changelog.html"))
+        second = recs[1]
+        self.assertEqual(second["title"], "April 28, 2026")
+        self.assertEqual(second["published_at"], "2026-04-28")
+        self.assertTrue(second["url"].endswith("#date-2026-04-28"))
+        self.assertIn("batch API endpoints", second["summary"])
+        self.assertIn("&", second["summary"])  # &amp; decoded
+
+    def test_empty_and_malformed_return_empty(self):
+        self.assertEqual(collect.parse_mistral_changelog(b""), [])
+        self.assertEqual(collect.parse_mistral_changelog(None), [])
+        self.assertEqual(collect.parse_mistral_changelog(123), [])
+        # A page with no changelog entries -> [] (no invented rows).
+        self.assertEqual(collect.parse_mistral_changelog(b"<html><body><h1>Changelog</h1></body></html>"), [])
+        # A <div id="date-..."> WITHOUT data-changelog-entry="true" is NOT a row:
+        # requiring the marker keeps unrelated dated divs out of the changelog.
+        self.assertEqual(
+            collect.parse_mistral_changelog(b'<div id="date-2026-01-01"><p>not a changelog entry</p></div>'), []
+        )
+        # The marker alone, without a date-shaped id, is also not enough.
+        self.assertEqual(
+            collect.parse_mistral_changelog(b'<div data-changelog-entry="true" id="sidebar"><p>nope</p></div>'), []
+        )
+
+    def test_base_url_override(self):
+        recs = collect.parse_mistral_changelog(
+            fx_bytes("mistral_changelog.html"), base_url="https://example.test/cl"
+        )
+        self.assertEqual(recs[0]["url"], "https://example.test/cl#date-2026-05-28")
+
+
+class TestParseA16zPortfolio(unittest.TestCase):
+    def test_basic(self):
+        recs = collect.parse_a16z_portfolio(fx_bytes("a16z_portfolio.html"))
+        # 3 valid companies (single-quoted, entity-encoded, relative-url); the
+        # malformed JSON blob is skipped, not fatal.
+        self.assertEqual(len(recs), 3)
+        air = recs[0]
+        self.assertEqual(air["title"], "Airbnb")
+        self.assertEqual(air["url"], "https://a16z.com/companies/airbnb/")
+        self.assertEqual(air["author"], "")
+        self.assertEqual(air["category"], "funding")
+        self.assertEqual(air["published_at"], "2011-07-22")  # initial_a16z_date_funded
+        self.assertNotIn("<", air["summary"])
+        self.assertIn("marketplace", air["summary"])
+        self.assertIn("&", air["summary"])  # &amp; decoded
+
+    def test_entity_encoded_blob(self):
+        recs = collect.parse_a16z_portfolio(fx_bytes("a16z_portfolio.html"))
+        fig = recs[1]
+        self.assertEqual(fig["title"], "Figma")
+        self.assertEqual(fig["url"], "https://a16z.com/companies/figma/")
+        self.assertEqual(fig["published_at"], "2020-04-29")  # investment_date preferred
+        self.assertIn("design tool", fig["summary"])
+
+    def test_relative_permalink_absolutized(self):
+        recs = collect.parse_a16z_portfolio(fx_bytes("a16z_portfolio.html"))
+        rel = recs[2]
+        self.assertEqual(rel["title"], "Relativeco")
+        self.assertEqual(rel["url"], "https://a16z.com/companies/relativeco/")  # joined to base
+        self.assertIsNone(rel["published_at"])  # no date fields
+
+    def test_empty_and_malformed_return_empty(self):
+        self.assertEqual(collect.parse_a16z_portfolio(b""), [])
+        self.assertEqual(collect.parse_a16z_portfolio(None), [])
+        self.assertEqual(collect.parse_a16z_portfolio(123), [])
+        # No data-company blobs -> [].
+        self.assertEqual(collect.parse_a16z_portfolio(b"<html><body><p>hi</p></body></html>"), [])
+        # A blob that isn't a JSON object (array / scalar) is skipped, not fatal.
+        self.assertEqual(collect.parse_a16z_portfolio(b"<div data-company='[1,2]'></div>"), [])
+
+    def test_base_url_override_for_relative(self):
+        recs = collect.parse_a16z_portfolio(
+            b"<div data-company='{\"name\":\"X\",\"permalink\":\"/companies/x/\"}'></div>",
+            base_url="https://example.test/portfolio/",
+        )
+        self.assertEqual(recs[0]["url"], "https://example.test/companies/x/")
+
+
 class TestAdaptGithubReleases(unittest.TestCase):
     """The adapt_github_releases shell (network stubbed): per-repo errors are
     isolated and each repo's releases are labeled with the repo they came from."""
@@ -628,6 +791,65 @@ class TestWiring(unittest.TestCase):
         self.assertEqual(gh["adapter"], "github_releases")
         self.assertTrue(collect.wired(gh))
         self.assertTrue(len(gh.get("watchlist") or []) >= 6)
+
+    def test_html_adapters_registered(self):
+        for name in ("claude_release_notes", "mistral_changelog", "a16z_portfolio"):
+            self.assertIn(name, collect.ADAPTERS)
+
+    def test_html_sources_wired_in_yaml(self):
+        by_key = {s["key"]: s for s in collect.load_sources()}
+        for key, adapter in (
+            ("claude-release-notes", "claude_release_notes"),
+            ("mistral-changelog", "mistral_changelog"),
+            ("a16z-portfolio", "a16z_portfolio"),
+        ):
+            self.assertEqual(by_key[key]["adapter"], adapter)
+            self.assertTrue(collect.wired(by_key[key]))  # status ok + adapter registered
+
+    def test_blocked_sources_left_untouched(self):
+        # Loop 2 must not chase the degraded sources.
+        by_key = {s["key"]: s for s in collect.load_sources()}
+        for key in ("gemini-changelog", "meta-ai-blog", "perplexity-changelog"):
+            self.assertEqual(by_key[key]["status"], "blocked")
+            self.assertIsNone(by_key[key]["adapter"])
+
+
+class TestHtmlAdaptShells(unittest.TestCase):
+    """The adapt_* shells must just fetch() then hand bytes to the pure parser —
+    verified with a stubbed fetch so the suite stays offline."""
+
+    def _patch_fetch(self, payload):
+        orig = collect.fetch
+        self._fetched_url = None
+
+        def fake(url, ua=None, **kw):
+            self._fetched_url = url
+            return payload
+
+        collect.fetch = fake
+        self.addCleanup(lambda: setattr(collect, "fetch", orig))
+
+    def test_claude_adapt_fetches_then_parses(self):
+        self._patch_fetch(fx_bytes("claude_release_notes.html"))
+        src = {"key": "claude-release-notes", "url": "https://support.claude.com/x"}
+        recs = collect.adapt_claude_release_notes(src)
+        self.assertEqual(self._fetched_url, "https://support.claude.com/x")
+        self.assertEqual(len(recs), 2)
+        self.assertTrue(recs[0]["url"].startswith("https://support.claude.com/x#"))
+
+    def test_mistral_adapt_fetches_then_parses(self):
+        self._patch_fetch(fx_bytes("mistral_changelog.html"))
+        src = {"key": "mistral-changelog", "url": "https://docs.mistral.ai/cl"}
+        recs = collect.adapt_mistral_changelog(src)
+        self.assertEqual(self._fetched_url, "https://docs.mistral.ai/cl")
+        self.assertEqual(recs[0]["url"], "https://docs.mistral.ai/cl#date-2026-05-28")
+
+    def test_a16z_adapt_fetches_then_parses(self):
+        self._patch_fetch(fx_bytes("a16z_portfolio.html"))
+        src = {"key": "a16z-portfolio", "url": "https://a16z.com/portfolio/"}
+        recs = collect.adapt_a16z_portfolio(src)
+        self.assertEqual(self._fetched_url, "https://a16z.com/portfolio/")
+        self.assertEqual(len(recs), 3)
 
 
 if __name__ == "__main__":
