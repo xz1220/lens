@@ -31,7 +31,7 @@ import urllib.request
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 from xml.etree import ElementTree as ET
 
 import yaml
@@ -52,6 +52,8 @@ DEFAULT_UA = (
 CLAUDE_RELEASE_URL = "https://support.claude.com/en/articles/12138966-release-notes"
 MISTRAL_CHANGELOG_URL = "https://docs.mistral.ai/resources/changelogs"
 A16Z_PORTFOLIO_URL = "https://a16z.com/portfolio/"
+ANTHROPIC_BASE = "https://www.anthropic.com"
+ALPHAXIV_BASE = "https://www.alphaxiv.org"
 
 
 # --------------------------------------------------------------------------- #
@@ -154,9 +156,15 @@ def _attr(attrs: str, name: str) -> str:
 
 
 def _human_date(text: str) -> str:
-    """'June 2, 2026' / 'Jun 2, 2026' -> '2026-06-02'. '' when it doesn't match."""
+    """Human date -> 'YYYY-MM-DD'. '' when nothing matches.
+
+    Covers both the US 'Month D, Y' shape ('June 2, 2026' / 'Jun 2, 2026',
+    Claude/Anthropic) and the day-first 'D Mon Y' shape ('04 Jun 2026',
+    alphaXiv). The shapes don't collide (one has a comma, the other doesn't),
+    so adding formats never re-interprets an already-handled date.
+    """
     text = (text or "").strip()
-    for fmt in ("%B %d, %Y", "%b %d, %Y"):
+    for fmt in ("%B %d, %Y", "%b %d, %Y", "%d %b %Y", "%d %B %Y"):
         try:
             return datetime.strptime(text, fmt).date().isoformat()
         except ValueError:
@@ -585,6 +593,250 @@ def adapt_a16z_portfolio(src: dict) -> list[dict]:
     return parse_a16z_portfolio(fetch(src["url"], ua=src.get("ua")), src["url"])
 
 
+# --------------------------------------------------------------------------- #
+# Anthropic blogs (news / engineering / research) — one shared parser.
+#
+# The spec expected a Pages-Router page with a `<script id="__NEXT_DATA__">`
+# JSON blob. The live site has since migrated to the Next.js App Router: there
+# is no __NEXT_DATA__ anymore, the per-route data ships as opaque `__next_f`
+# RSC flight chunks (NOT clean JSON — `new Date(...)`/`$L1` refs, unparseable
+# with stdlib json), and the article list is server-rendered as HTML cards.
+# So parse_anthropic_next tries BOTH, in order, and returns whichever yields
+# rows (honest: real server-rendered data either way, never invented):
+#   1. __NEXT_DATA__ JSON  — the documented shape; still handled if a page
+#      serves it, proven by the anthropic_next_data fixture.
+#   2. SSR article cards    — the current live shape (FeaturedGrid /
+#      PublicationList / ArticleList layouts), proven by the per-section
+#      fixtures trimmed from the real pages.
+# Unknown structure / empty input -> [] (never raises, never fabricates).
+# --------------------------------------------------------------------------- #
+_ANTHROPIC_TITLE_KEYS = ("title", "heading", "headline", "name")
+_ANTHROPIC_SLUG_KEYS = ("slug", "path", "url", "href")
+_ANTHROPIC_SUMMARY_KEYS = ("subtitle", "description", "excerpt", "summary", "preview", "subhead")
+_ANTHROPIC_DATE_KEYS = ("publishedOn", "publishedAt", "datePublished", "date", "published", "publishDate")
+
+
+def _slug_str(value) -> str:
+    """A slug field may be a plain string or a Sanity-style {'current': ...} dict."""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        return _as_str(value.get("current") or value.get("slug") or value.get("path"))
+    return ""
+
+
+def _first_key(d: dict, keys) -> str:
+    for k in keys:
+        v = d.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
+
+
+def _anthropic_abs_url(base: str, section: str, slug: str) -> str:
+    if slug.startswith("http"):
+        return slug
+    if slug.startswith("/"):
+        return base + slug
+    return f"{base}/{section}/{slug}"
+
+
+def _anthropic_looks_like_article(d) -> bool:
+    if not isinstance(d, dict):
+        return False
+    has_title = any(isinstance(d.get(k), str) and d.get(k).strip() for k in _ANTHROPIC_TITLE_KEYS)
+    has_slug = any(_slug_str(d.get(k)) for k in _ANTHROPIC_SLUG_KEYS)
+    return has_title and has_slug
+
+
+def _anthropic_from_next_data(text: str, base: str, section: str) -> list[dict]:
+    """Path 1: pull articles out of a `<script id="__NEXT_DATA__">` JSON blob.
+
+    Finds the LONGEST list anywhere in the parsed tree whose elements look like
+    articles (a title-ish key + a slug/path-ish key), then maps each. Returns []
+    when the script is absent, the JSON is junk, or no article list is found.
+    """
+    m = re.search(r'(?is)<script[^>]*\bid="__NEXT_DATA__"[^>]*>(.*?)</script>', text)
+    if not m:
+        return []
+    try:
+        data = json.loads(m.group(1))
+    except (ValueError, TypeError):
+        return []
+    best: list[dict] = []
+
+    def walk(node):
+        nonlocal best
+        if isinstance(node, list):
+            arts = [x for x in node if _anthropic_looks_like_article(x)]
+            if len(arts) > len(best):
+                best = arts
+            for x in node:
+                walk(x)
+        elif isinstance(node, dict):
+            for v in node.values():
+                walk(v)
+
+    walk(data)
+    out: list[dict] = []
+    for a in best:
+        title = strip_html(_first_key(a, _ANTHROPIC_TITLE_KEYS), limit=300)
+        slug = ""
+        for k in _ANTHROPIC_SLUG_KEYS:
+            slug = _slug_str(a.get(k))
+            if slug:
+                break
+        if not (title and slug):
+            continue
+        author = a.get("author")
+        if isinstance(author, dict):
+            author = _as_str(author.get("name"))
+        elif isinstance(author, list) and author:
+            author = _as_str(author[0].get("name") if isinstance(author[0], dict) else author[0])
+        else:
+            author = _as_str(author)
+        date_raw = _first_key(a, _ANTHROPIC_DATE_KEYS)
+        out.append({
+            "title": title,
+            "url": _anthropic_abs_url(base, section, slug),
+            "summary": strip_html(_first_key(a, _ANTHROPIC_SUMMARY_KEYS)),
+            "author": author,
+            "published_at": norm_date(date_raw) if date_raw else None,
+            "category": "company",
+        })
+    return out
+
+
+def _anthropic_card_title(inner: str) -> str:
+    """A card's title is its heading (FeaturedGrid/ArticleList) or a
+    `class*=title` span (PublicationList). '' when neither is present — that
+    keeps icon/nav anchors (which have no title) from becoming rows."""
+    h = re.search(r"(?is)<h[1-6][^>]*>(.*?)</h[1-6]>", inner)
+    if h:
+        return strip_html(h.group(1), limit=300)
+    s = re.search(r'(?is)<span[^>]*\bclass="[^"]*title[^"]*"[^>]*>(.*?)</span>', inner)
+    return strip_html(s.group(1), limit=300) if s else ""
+
+
+def _anthropic_card_date(inner: str) -> str:
+    """A card's date is in a <time> (news/research) or a `class*=date`
+    div/span (engineering). '' when absent."""
+    t = re.search(r"(?is)<time[^>]*>(.*?)</time>", inner)
+    if t:
+        return strip_html(t.group(1), limit=60)
+    d = re.search(r'(?is)<(div|span)[^>]*\bclass="[^"]*date[^"]*"[^>]*>(.*?)</\1>', inner)
+    return strip_html(d.group(2), limit=60) if d else ""
+
+
+def _anthropic_from_html(text: str, base: str, section: str) -> list[dict]:
+    """Path 2: scrape the server-rendered article cards for one section.
+
+    Matches every `<a href="/{section}/{slug}">…</a>` whose slug is a single
+    path segment — so `/research/team/alignment` (a team page, two segments) is
+    excluded, not mistaken for an article. Title/date/summary come from the
+    anchor's own markup; per-card category is ignored (fixed to 'company').
+    Deduped by url, document order preserved.
+    """
+    sec = section.strip("/")
+    pat = re.compile(
+        r'(?is)<a\b[^>]*?\bhref="(/' + re.escape(sec) + r'/[^"/?#]+)"[^>]*>(.*?)</a>'
+    )
+    out: list[dict] = []
+    seen: set[str] = set()
+    for m in pat.finditer(text):
+        path, inner = m.group(1), m.group(2)
+        title = _anthropic_card_title(inner)
+        if not title or path in seen:
+            continue
+        seen.add(path)
+        date_text = _anthropic_card_date(inner)
+        p = re.search(r"(?is)<p\b[^>]*>(.*?)</p>", inner)
+        out.append({
+            "title": title,
+            "url": base + path,
+            "summary": strip_html(p.group(1)) if p else "",
+            "author": "",
+            "published_at": _human_date(date_text) or None,
+            "category": "company",
+        })
+    return out
+
+
+def parse_anthropic_next(raw, base: str = ANTHROPIC_BASE, section: str = "news") -> list[dict]:
+    """Parse one already-fetched Anthropic blog index. No network.
+
+    Tries the __NEXT_DATA__ JSON blob first, then the SSR article cards; returns
+    the first non-empty result. `section` is the path prefix ('news' /
+    'engineering' / 'research') used to scope cards and build slug-only urls.
+    Empty / unrecognized input -> [] (never raises, never invents data).
+    """
+    text = _html_text(raw)
+    if not text.strip():
+        return []
+    return _anthropic_from_next_data(text, base, section) or _anthropic_from_html(text, base, section)
+
+
+def adapt_anthropic(src: dict) -> list[dict]:
+    """Shared by anthropic-news / -engineering / -research: base + section are
+    derived from the live url so one adapter serves all three."""
+    url = src["url"]
+    parts = urlsplit(url)
+    base = f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else ANTHROPIC_BASE
+    section = (parts.path.strip("/").split("/")[0] if parts.path.strip("/") else "") or "news"
+    return parse_anthropic_next(fetch(url, ua=src.get("ua")), base, section)
+
+
+# --------------------------------------------------------------------------- #
+# alphaXiv — the explore feed is server-rendered (the paper title + arXiv-style
+# link + date live in the DOM; only the abstract sits in an unparseable JS
+# flight blob, which we drop). One record per paper card. Class names are
+# utility/hashed and may change — defensive: unknown structure -> [].
+# --------------------------------------------------------------------------- #
+def parse_alphaxiv(raw, base: str = ALPHAXIV_BASE) -> list[dict]:
+    """Parse one already-fetched alphaXiv index. No network.
+
+    Each paper is an `<a href="/abs/{id}">{title}</a>` (the id may be an arXiv
+    number or a slug like 'mai-thinking-1'); the publication date is the first
+    'DD Mon YYYY' span that follows it, bounded to before the next paper anchor
+    so a dateless card can't borrow its neighbour's date. Deduped by url. The
+    abstract isn't in the DOM, so summary is left empty. Empty / unrecognized
+    input -> [] (never raises, never invents data).
+    """
+    text = _html_text(raw)
+    if not text.strip():
+        return []
+    # Drop <script>/<style> so we only read the server-rendered DOM (the JS
+    # flight blob repeats the same /abs/ links and would create phantom dupes).
+    dom = re.sub(r"(?is)<script.*?</script>|<style.*?</style>", " ", text)
+    out: list[dict] = []
+    seen: set[str] = set()
+    for m in re.finditer(r'(?is)<a\b[^>]*?\bhref="(/abs/[^"?#]+)"[^>]*>(.*?)</a>', dom):
+        path = m.group(1)
+        title = strip_html(m.group(2), limit=300)
+        if not title or path in seen:
+            continue
+        seen.add(path)
+        tail = dom[m.end():]
+        nxt = tail.find('href="/abs/')
+        region = tail[:nxt] if nxt != -1 else tail[:800]
+        dm = re.search(r"(?is)<span[^>]*>\s*(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\s*</span>", region)
+        out.append({
+            "title": title,
+            "url": base + path,
+            "summary": "",
+            "author": "",
+            "published_at": _human_date(dm.group(1)) if dm else None,
+            "category": "paper",
+        })
+    return out
+
+
+def adapt_alphaxiv(src: dict) -> list[dict]:
+    parts = urlsplit(src["url"])
+    base = f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else ALPHAXIV_BASE
+    return parse_alphaxiv(fetch(src["url"], ua=src.get("ua")), base)
+
+
 ADAPTERS = {
     "generic_feed": adapt_generic_feed,
     "hf_daily_papers": adapt_hf_daily_papers,
@@ -596,6 +848,8 @@ ADAPTERS = {
     "claude_release_notes": adapt_claude_release_notes,
     "mistral_changelog": adapt_mistral_changelog,
     "a16z_portfolio": adapt_a16z_portfolio,
+    "anthropic_next": adapt_anthropic,
+    "alphaxiv": adapt_alphaxiv,
 }
 
 

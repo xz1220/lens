@@ -152,6 +152,16 @@ class TestParseGenericFeed(unittest.TestCase):
         self.assertEqual(collect.parse_generic_feed(None), [])
         self.assertEqual(collect.parse_generic_feed(123), [])  # non-bytes scalar
 
+    def test_karpathy_bearblog_atom(self):
+        # Loop 3 repointed `karpathy` to its real bearblog Atom feed; the shared
+        # generic_feed parser handles it (trimmed real-feed fixture, no network).
+        recs = collect.parse_generic_feed(fx_bytes("karpathy_bearblog.xml"))
+        self.assertEqual(len(recs), 2)
+        self.assertEqual(recs[0]["title"], "Sequoia Ascent 2026 summary")
+        self.assertEqual(recs[0]["url"], "https://karpathy.bearblog.dev/sequoia-ascent-2026/")
+        self.assertEqual(recs[0]["author"], "karpathy")
+        self.assertEqual(recs[0]["published_at"], "2026-04-30T16:30:08+00:00")
+
     def test_item_missing_url_kept_by_parse_dropped_by_save(self):
         # An item with a title but no link is still parsed (title-only); save()
         # is what drops it because it has no url (see TestInvariant/isolation).
@@ -541,6 +551,176 @@ class TestParseA16zPortfolio(unittest.TestCase):
         self.assertEqual(recs[0]["url"], "https://example.test/companies/x/")
 
 
+# --------------------------------------------------------------------------- #
+# Anthropic blogs (Loop 3) — shared parser, two paths: __NEXT_DATA__ JSON and
+# App-Router SSR cards. Fixtures: anthropic_next_data.html (synthetic JSON blob)
+# + anthropic_{news,engineering,research}.html (trimmed from the real pages).
+# --------------------------------------------------------------------------- #
+class TestParseAnthropicNextData(unittest.TestCase):
+    """Path 1: articles pulled out of a __NEXT_DATA__ JSON blob."""
+
+    def test_basic(self):
+        recs = collect.parse_anthropic_next(fx_bytes("anthropic_next_data.html"), section="news")
+        self.assertEqual(len(recs), 3)  # the 1-item nav list loses to the 3-item posts list
+        first = recs[0]
+        self.assertEqual(first["title"], "Introducing Claude Opus 4.8")
+        # slug given as a Sanity {"current": ...} dict -> /news/<current>
+        self.assertEqual(first["url"], "https://www.anthropic.com/news/claude-opus-4-8")
+        self.assertEqual(first["author"], "Anthropic")  # author given as {"name": ...}
+        self.assertEqual(first["category"], "company")
+        self.assertEqual(first["published_at"], "2026-05-28T12:00:00+00:00")
+        self.assertIn("Opus class", first["summary"])
+
+    def test_path_and_absolute_and_entities(self):
+        recs = collect.parse_anthropic_next(fx_bytes("anthropic_next_data.html"), section="news")
+        # second entry uses a leading-slash `path` + string author + &#39; entity
+        self.assertEqual(recs[1]["url"], "https://www.anthropic.com/news/expanding-project-glasswing")
+        self.assertEqual(recs[1]["author"], "Policy Team")
+        self.assertEqual(recs[1]["published_at"], "2026-06-02T00:00:00+00:00")
+        self.assertIn("We're", recs[1]["summary"])  # &#39; decoded
+        # third entry: title via `heading`, already-absolute url kept verbatim
+        self.assertEqual(recs[2]["title"], "A note with an absolute link")
+        self.assertEqual(recs[2]["url"], "https://www.anthropic.com/news/absolute-note")
+        self.assertEqual(recs[2]["author"], "")
+
+    def test_next_data_wins_over_ssr_cards(self):
+        # A page carrying BOTH a __NEXT_DATA__ posts array and an SSR card must
+        # use the JSON (path 1 short-circuits) — proves precedence, not OR-luck.
+        html = (
+            b'<a href="/news/should-be-ignored"><h2>SSR card title</h2></a>'
+            b'<script id="__NEXT_DATA__" type="application/json">'
+            b'{"props":{"pageProps":{"posts":['
+            b'{"title":"From JSON","slug":"json-wins","date":"2026-01-01T00:00:00Z"}]}}}'
+            b"</script>"
+        )
+        recs = collect.parse_anthropic_next(html, section="news")
+        self.assertEqual(len(recs), 1)
+        self.assertEqual(recs[0]["title"], "From JSON")
+        self.assertEqual(recs[0]["url"], "https://www.anthropic.com/news/json-wins")
+
+    def test_malformed_next_data_falls_through_to_html(self):
+        # Junk JSON in the script must not raise; with no SSR cards either -> [].
+        self.assertEqual(
+            collect.parse_anthropic_next(
+                b'<script id="__NEXT_DATA__">{not valid json</script>', section="news"
+            ),
+            [],
+        )
+
+
+class TestParseAnthropicSSR(unittest.TestCase):
+    """Path 2: the live App-Router pages — three card layouts, no __NEXT_DATA__."""
+
+    def test_news_featured_and_publication_list(self):
+        recs = collect.parse_anthropic_next(fx_bytes("anthropic_news.html"), section="news")
+        self.assertEqual(len(recs), 3)
+        feat = recs[0]  # FeaturedGrid card: <h2> title, <time> date, <p> summary
+        self.assertEqual(feat["title"], "Introducing Claude Opus 4.8")
+        self.assertEqual(feat["url"], "https://www.anthropic.com/news/claude-opus-4-8")
+        self.assertEqual(feat["category"], "company")
+        self.assertEqual(feat["published_at"], "2026-05-28")  # "May 28, 2026" normalized
+        self.assertIn("Opus class", feat["summary"])
+        self.assertNotIn("<", feat["summary"])
+        # PublicationList card: title in a <span class=...title>, no <p> summary
+        self.assertEqual(recs[1]["url"], "https://www.anthropic.com/news/services-track-partner-hub")
+        self.assertIn("Services Track", recs[1]["title"])
+        self.assertEqual(recs[1]["published_at"], "2026-06-03")  # "Jun 3, 2026"
+        self.assertEqual(recs[1]["summary"], "")
+        for r in recs:
+            self.assertTrue(r["url"].startswith("https://www.anthropic.com/news/"))
+
+    def test_engineering_articlelist_layout(self):
+        # Engineering uses <h3> + a `class*=date` div (no <time>); date still parses.
+        recs = collect.parse_anthropic_next(fx_bytes("anthropic_engineering.html"), section="engineering")
+        self.assertEqual(len(recs), 2)
+        self.assertEqual(recs[0]["title"], "An update on recent Claude Code quality reports")
+        self.assertEqual(recs[0]["url"], "https://www.anthropic.com/engineering/april-23-postmortem")
+        self.assertEqual(recs[0]["published_at"], "2026-04-23")
+        self.assertEqual(recs[1]["published_at"], "2026-04-08")  # zero-padded "Apr 08, 2026"
+        for r in recs:
+            self.assertTrue(r["url"].startswith("https://www.anthropic.com/engineering/"))
+
+    def test_research_excludes_team_pages(self):
+        recs = collect.parse_anthropic_next(fx_bytes("anthropic_research.html"), section="research")
+        self.assertEqual(len(recs), 2)  # the /research/team/alignment link is NOT an article
+        self.assertEqual(recs[0]["url"], "https://www.anthropic.com/research/natural-language-autoencoders")
+        self.assertEqual(recs[0]["published_at"], "2026-05-07")
+        self.assertIn("talk in words", recs[0]["summary"])
+        self.assertEqual(recs[1]["title"], "Teaching Claude why")  # title via <h4 class=...title>
+        self.assertEqual(recs[1]["published_at"], "2026-05-08")
+        for r in recs:
+            self.assertNotIn("/research/team/", r["url"])
+
+    def test_default_section_and_base_override(self):
+        # section defaults to 'news'; base is overridable for slug-only urls.
+        recs = collect.parse_anthropic_next(
+            fx_bytes("anthropic_news.html"), base="https://example.test", section="news"
+        )
+        self.assertTrue(recs[0]["url"].startswith("https://example.test/news/"))
+
+    def test_empty_and_malformed_return_empty(self):
+        self.assertEqual(collect.parse_anthropic_next(b""), [])
+        self.assertEqual(collect.parse_anthropic_next(None), [])
+        self.assertEqual(collect.parse_anthropic_next(123), [])  # non-bytes scalar
+        # Real HTML, but no article cards for this section and no __NEXT_DATA__.
+        self.assertEqual(
+            collect.parse_anthropic_next(b"<html><body><p>About us</p></body></html>", section="news"), []
+        )
+        # An icon/nav anchor (matches the href but carries no title) is not a row.
+        self.assertEqual(
+            collect.parse_anthropic_next(b'<a href="/news/x"><svg></svg></a>', section="news"), []
+        )
+
+
+class TestParseAlphaxiv(unittest.TestCase):
+    def test_basic(self):
+        recs = collect.parse_alphaxiv(fx_bytes("alphaxiv.html"))
+        self.assertEqual(len(recs), 3)
+        first = recs[0]
+        self.assertEqual(first["title"], "OPRD: On-Policy Representation Distillation")
+        self.assertEqual(first["url"], "https://www.alphaxiv.org/abs/2606.06021")
+        self.assertEqual(first["category"], "paper")
+        self.assertEqual(first["published_at"], "2026-06-04")  # "04 Jun 2026" normalized
+        self.assertEqual(first["summary"], "")  # abstract isn't in the DOM
+        self.assertEqual(recs[1]["title"], "Agents' Last Exam")
+        self.assertEqual(recs[1]["published_at"], "2026-06-03")
+        for r in recs:
+            self.assertTrue(r["url"].startswith("https://www.alphaxiv.org/abs/"))
+
+    def test_non_arxiv_slug_and_missing_date(self):
+        # A non-arXiv id ('mai-thinking-1') is still a valid paper; a card with
+        # no date span yields published_at=None (not a borrowed neighbour date).
+        recs = collect.parse_alphaxiv(fx_bytes("alphaxiv.html"))
+        last = recs[2]
+        self.assertEqual(last["url"], "https://www.alphaxiv.org/abs/mai-thinking-1")
+        self.assertIsNone(last["published_at"])
+
+    def test_dedup_by_url(self):
+        # The same /abs/ link appears multiple times per card (title + icon
+        # button); only the first title-bearing one becomes a record.
+        html = (
+            b'<a href="/abs/1234.5678"><div>A Real Paper Title</div></a>'
+            b'<a href="/abs/1234.5678"><svg>icon</svg></a>'
+        )
+        recs = collect.parse_alphaxiv(html)
+        self.assertEqual(len(recs), 1)
+        self.assertEqual(recs[0]["title"], "A Real Paper Title")
+
+    def test_base_override(self):
+        recs = collect.parse_alphaxiv(
+            b'<a href="/abs/9"><div>T</div></a>', base="https://example.test"
+        )
+        self.assertEqual(recs[0]["url"], "https://example.test/abs/9")
+
+    def test_empty_and_malformed_return_empty(self):
+        self.assertEqual(collect.parse_alphaxiv(b""), [])
+        self.assertEqual(collect.parse_alphaxiv(None), [])
+        self.assertEqual(collect.parse_alphaxiv(123), [])
+        self.assertEqual(collect.parse_alphaxiv(b"<html><body><p>no papers here</p></body></html>"), [])
+        # An /abs/ anchor with no title text is skipped, not turned into a row.
+        self.assertEqual(collect.parse_alphaxiv(b'<a href="/abs/1"><svg></svg></a>'), [])
+
+
 class TestAdaptGithubReleases(unittest.TestCase):
     """The adapt_github_releases shell (network stubbed): per-repo errors are
     isolated and each repo's releases are labeled with the repo they came from."""
@@ -813,6 +993,38 @@ class TestWiring(unittest.TestCase):
             self.assertEqual(by_key[key]["status"], "blocked")
             self.assertIsNone(by_key[key]["adapter"])
 
+    # ----- Loop 3: Anthropic ×3 (shared anthropic_next) + alphaxiv + karpathy -----
+    def test_loop3_adapters_registered(self):
+        self.assertIn("anthropic_next", collect.ADAPTERS)
+        self.assertIn("alphaxiv", collect.ADAPTERS)
+
+    def test_anthropic_three_blogs_wired_to_shared_adapter(self):
+        by_key = {s["key"]: s for s in collect.load_sources()}
+        for key in ("anthropic-news", "anthropic-engineering", "anthropic-research"):
+            self.assertEqual(by_key[key]["adapter"], "anthropic_next")  # one shared adapter
+            self.assertTrue(collect.wired(by_key[key]))  # status ok + adapter registered
+
+    def test_alphaxiv_wired(self):
+        by_key = {s["key"]: s for s in collect.load_sources()}
+        self.assertEqual(by_key["alphaxiv"]["adapter"], "alphaxiv")
+        self.assertTrue(collect.wired(by_key["alphaxiv"]))
+
+    def test_karpathy_repointed_to_atom_feed(self):
+        # karpathy.ai is SSR but has no post feed; honestly wired via the real
+        # bearblog Atom feed (generic_feed) rather than faking homepage entries.
+        by_key = {s["key"]: s for s in collect.load_sources()}
+        kp = by_key["karpathy"]
+        self.assertEqual(kp["adapter"], "generic_feed")
+        self.assertEqual(kp["method"], "atom")
+        self.assertIn("bearblog.dev", kp["url"])
+        self.assertTrue(collect.wired(kp))
+
+    def test_no_needs_parse_sources_remain(self):
+        # Loop 3 cleared the needs_parse backlog: every source is now either
+        # wired (ok) or an honestly-degraded token/headless/blocked source.
+        for s in collect.load_sources():
+            self.assertNotEqual(s.get("status"), "needs_parse")
+
 
 class TestHtmlAdaptShells(unittest.TestCase):
     """The adapt_* shells must just fetch() then hand bytes to the pure parser —
@@ -850,6 +1062,26 @@ class TestHtmlAdaptShells(unittest.TestCase):
         recs = collect.adapt_a16z_portfolio(src)
         self.assertEqual(self._fetched_url, "https://a16z.com/portfolio/")
         self.assertEqual(len(recs), 3)
+
+    def test_anthropic_adapt_derives_section_from_url(self):
+        # The shared adapt_anthropic derives base + section from the live url,
+        # so the SAME adapter serves all three blogs. Feed it the engineering
+        # fixture under the engineering url and the section must follow.
+        self._patch_fetch(fx_bytes("anthropic_engineering.html"))
+        src = {"key": "anthropic-engineering", "url": "https://www.anthropic.com/engineering"}
+        recs = collect.adapt_anthropic(src)
+        self.assertEqual(self._fetched_url, "https://www.anthropic.com/engineering")
+        self.assertEqual(len(recs), 2)
+        for r in recs:
+            self.assertTrue(r["url"].startswith("https://www.anthropic.com/engineering/"))
+
+    def test_alphaxiv_adapt_fetches_then_parses(self):
+        self._patch_fetch(fx_bytes("alphaxiv.html"))
+        src = {"key": "alphaxiv", "url": "https://www.alphaxiv.org/"}
+        recs = collect.adapt_alphaxiv(src)
+        self.assertEqual(self._fetched_url, "https://www.alphaxiv.org/")
+        self.assertEqual(len(recs), 3)
+        self.assertTrue(recs[0]["url"].startswith("https://www.alphaxiv.org/abs/"))
 
 
 if __name__ == "__main__":

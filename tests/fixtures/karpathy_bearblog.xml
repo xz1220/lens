@@ -1,0 +1,43 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>https://karpathy.bearblog.dev</id>
+  <title>karpathy</title>
+  <updated>2026-06-08T05:53:20.702014+00:00</updated>
+  <author>
+    <name>karpathy</name>
+  </author>
+  <link href="https://karpathy.bearblog.dev/" rel="alternate"/>
+  <link href="https://karpathy.bearblog.dev/feed/" rel="self"/>
+  <generator uri="https://lkiesow.github.io/python-feedgen" version="0.9.0">python-feedgen</generator>
+  <subtitle>Bear blog of Andrej Karpathy, AI researcher. Started March 2025.&#13;
+main webpage: karpathy.ai&#13;
+𝕏 @karpathy&#13;
+Subscribe to this blog via RSS feed&#13;
+...</subtitle>
+  <entry>
+    <id>https://karpathy.bearblog.dev/sequoia-ascent-2026/</id>
+    <title>Sequoia Ascent 2026 summary</title>
+    <updated>2026-04-30T16:30:08.883848+00:00</updated>
+    <author>
+      <name>karpathy</name>
+      <email>hidden</email>
+    </author>
+    <content type="html">Trimmed for fixture.</content>
+    <link href="https://karpathy.bearblog.dev/sequoia-ascent-2026/" rel="alternate"/>
+    <summary>Summary of my talk at Sequoia Ascent</summary>
+    <published>2026-04-30T16:00:00+00:00</published>
+  </entry>
+<entry>
+    <id>https://karpathy.bearblog.dev/year-in-review-2025/</id>
+    <title>2025 LLM Year in Review</title>
+    <updated>2025-12-20T00:24:51.072798+00:00</updated>
+    <author>
+      <name>karpathy</name>
+      <email>hidden</email>
+    </author>
+    <content type="html">Trimmed for fixture.</content>
+    <link href="https://karpathy.bearblog.dev/year-in-review-2025/" rel="alternate"/>
+    <summary>2025 Year in Review of LLM paradigm changes</summary>
+    <published>2025-12-19T18:00:00+00:00</published>
+  </entry>
+</feed>

@@ -17,7 +17,7 @@ meta:
   verified_on: "2026-06-05"
   provenance: "life-os: intake/topics/ai-and-ai-agent/research/2026-06-05-workflow.md"
   total: 31
-  wired_adapters: [generic_feed, hf_daily_papers, hn_algolia, ossinsight, yc_launches, hf_models, github_releases, claude_release_notes, mistral_changelog, a16z_portfolio]
+  wired_adapters: [generic_feed, hf_daily_papers, hn_algolia, ossinsight, yc_launches, hf_models, github_releases, claude_release_notes, mistral_changelog, a16z_portfolio, anthropic_next, alphaxiv]
 
 sources:
   # ---------- P0: machine-first primary ----------
@@ -37,9 +37,9 @@ sources:
     category: company
     url: https://www.anthropic.com/news
     method: html
-    adapter: null
-    status: needs_parse
-    notes: Next.js 页面，列表在 __NEXT_DATA__ 内嵌 JSON；无官方 rss.xml（404）。解析 JSON 而非纯文本 diff。
+    adapter: anthropic_next
+    status: ok
+    notes: Next.js 页面，无官方 rss.xml（404）。实测站点已迁到 App Router——不再有 __NEXT_DATA__，文章列表服务端渲染成 HTML 卡片（FeaturedGrid/PublicationList）。parse_anthropic_next 先试 __NEXT_DATA__ JSON（若存在），再抓 SSR 卡片；标准库解析，结构变动可能失效。
 
   - key: anthropic-engineering
     name: Anthropic Engineering
@@ -47,9 +47,9 @@ sources:
     category: company
     url: https://www.anthropic.com/engineering
     method: html
-    adapter: null
-    status: needs_parse
-    notes: 同 Newsroom，内嵌 JSON，无 RSS。工程向。
+    adapter: anthropic_next
+    status: ok
+    notes: 同 Newsroom，App Router SSR HTML（ArticleList 布局，h3 标题 + date div），无 RSS。共用 anthropic_next。工程向。
 
   - key: anthropic-research
     name: Anthropic Research
@@ -57,9 +57,9 @@ sources:
     category: company
     url: https://www.anthropic.com/research
     method: html
-    adapter: null
-    status: needs_parse
-    notes: 同上，研究向。另有 transformer-circuits.pub / alignment.anthropic.com 可选深研究源。
+    adapter: anthropic_next
+    status: ok
+    notes: 同上，App Router SSR HTML，共用 anthropic_next（/research/team/* 团队页按单段 slug 规则排除）。研究向。另有 transformer-circuits.pub / alignment.anthropic.com 可选深研究源。
 
   - key: claude-release-notes
     name: Claude Release Notes
@@ -191,11 +191,11 @@ sources:
     name: Andrej Karpathy
     tier: P1
     category: researcher_note
-    url: https://karpathy.ai/
-    method: html
-    adapter: null
-    status: needs_parse
-    notes: Blog 低频，页面需解析；X 作为早期信号（lens 暂不接 X）。
+    url: https://karpathy.bearblog.dev/feed/
+    method: atom
+    adapter: generic_feed
+    status: ok
+    notes: 实测 karpathy.ai 是服务端渲染的个人主页（非 JS-only），但没有「带日期的文章列表」可抓——博客已迁到 karpathy.bearblog.dev（主页自己标注 current blog）。该 bearblog 暴露官方 Atom feed，故 url 改指 feed、走 generic_feed 诚实接上，而不是对主页伪造条目。X 作为早期信号（lens 暂不接 X）。
 
   - key: lilian-weng
     name: Lilian Weng (Lil'Log)
@@ -244,9 +244,9 @@ sources:
     category: paper
     url: https://www.alphaxiv.org/
     method: html
-    adapter: null
-    status: needs_parse
-    notes: arXiv 讨论层，验证热度用，不替代 arXiv。
+    adapter: alphaxiv
+    status: ok
+    notes: arXiv 讨论层，验证热度用，不替代 arXiv。实测 explore 流服务端渲染：paper 标题 + /abs/ 链接 + 日期在 DOM 里（摘要只在不可解析的 JS flight blob 中，丢弃）。标准库正则解析，class 名是 utility/hash，结构变动可能失效。
 
   - key: hf-trending
     name: HF Trending / Papers with Code

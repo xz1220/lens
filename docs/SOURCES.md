@@ -13,16 +13,16 @@
   - `blocked` —— 当前抓不到（OAuth 墙 / bot 拦截），已降级不追
 - **adapter** —— `collect.py` 里负责采它的 handler；`null` = 源是真的、采集还没接（最自然的下一批任务）。
 
-当前 **19 个已接通**（adapter 非 null 且 status=ok），**12 个待接**。
+当前 **24 个已接通**（adapter 非 null 且 status=ok），**7 个待接**。
 
 ## P0 · 机器优先源（15）
 
 | 源 | 入口 | method | status | adapter | 备注 |
 |---|---|---|---|---|---|
 | OpenAI News | `openai.com/news/rss.xml` | rss | ok | generic_feed | OpenAI 收敛到这一个 |
-| Anthropic Newsroom | `anthropic.com/news` | html | needs_parse | — | 内嵌 JSON，无 RSS |
-| Anthropic Engineering | `anthropic.com/engineering` | html | needs_parse | — | 同上，工程向 |
-| Anthropic Research | `anthropic.com/research` | html | needs_parse | — | 同上，研究向 |
+| Anthropic Newsroom | `anthropic.com/news` | html | ok | anthropic_next | App Router SSR（已无 __NEXT_DATA__），抓服务端渲染文章卡片；先试 __NEXT_DATA__ JSON 再退回卡片（HTML 抓取，结构变动可能失效）|
+| Anthropic Engineering | `anthropic.com/engineering` | html | ok | anthropic_next | 同上，ArticleList 布局，共用 anthropic_next |
+| Anthropic Research | `anthropic.com/research` | html | ok | anthropic_next | 同上，共用 anthropic_next（/research/team/* 团队页排除）|
 | Claude Release Notes | `support.claude.com/.../release-notes` | html | ok | claude_release_notes | 服务端渲染，按日期 h3 切条（HTML 抓取，结构变动可能失效）|
 | Gemini API Changelog | `ai.google.dev/.../changelog` | html | **blocked** | — | 跳 OAuth，降级不追 |
 | DeepMind Blog | `deepmind.google/blog/rss.xml` | rss | ok | generic_feed | 官方 RSS（调研中发现）|
@@ -40,7 +40,7 @@
 | 源 | 入口 | method | status | adapter | 备注 |
 |---|---|---|---|---|---|
 | Simon Willison | `simonwillison.net/atom/everything/` | atom | ok | generic_feed | LLM/agent/tooling 高信噪比 |
-| Andrej Karpathy | `karpathy.ai/` | html | needs_parse | — | blog 低频，X 作早期信号 |
+| Andrej Karpathy | `karpathy.bearblog.dev/feed/` | atom | ok | generic_feed | karpathy.ai 是 SSR 主页但无文章列表；博客已迁 bearblog（有官方 Atom），改指 feed 诚实接上，未伪造主页条目 |
 | Lilian Weng | `lilianweng.github.io/index.xml` | rss | ok | generic_feed | 深度综述 |
 | Interconnects | `interconnects.ai/feed` | rss | ok | generic_feed | 开源模型/RLHF/训练 |
 | Latent Space | `latent.space/feed` | rss | ok | generic_feed | AI engineer/agent 访谈 |
@@ -50,7 +50,7 @@
 
 | 源 | 入口 | method | status | adapter | 备注 |
 |---|---|---|---|---|---|
-| alphaXiv | `alphaxiv.org` | html | needs_parse | — | arXiv 讨论层 |
+| alphaXiv | `alphaxiv.org` | html | ok | alphaxiv | arXiv 讨论层；explore 流服务端渲染（标题 + /abs/ 链接 + 日期在 DOM，摘要在不可解析 JS blob 丢弃）（HTML 抓取，结构变动可能失效）|
 | HF Trending | `huggingface.co/papers/trending` | json | ok | — | 验证代码/benchmark |
 | YC Companies | `ycombinator.com/companies` | html | needs_headless | — | Algolia，需 headless |
 | a16z Portfolio | `a16z.com/portfolio/` | html | ok | a16z_portfolio | 服务端渲染，data-company 内嵌 JSON（HTML 抓取，结构变动可能失效）|
@@ -73,5 +73,8 @@
 3. `python3 collect.py --source <key>` 验证。
 
 已接：Loop 1 接了 HF Hub / GitHub releases 等 JSON 源；Loop 2 接了 Claude release notes / Mistral /
-a16z 三个 SSR HTML 源（标准库解析）。最自然的下一批：`needs_parse` 的 Anthropic 三博客（解析
-`__NEXT_DATA__` 内嵌 JSON）、已 `ok` 但没接的 `hf-trending` JSON、`sec-edgar-api`（需查询设计）。
+a16z 三个 SSR HTML 源（标准库解析）；Loop 3 接了 Anthropic 三博客（共用 `anthropic_next`——实测站点已迁
+App Router，无 `__NEXT_DATA__`，抓服务端渲染卡片，parser 仍保留 `__NEXT_DATA__` JSON 快路径）、alphaXiv
+（explore 流 SSR），并把 `karpathy` 从抓不出列表的主页改指其 bearblog 官方 Atom（走 generic_feed）。
+剩下 7 个待接：`ok` 但没接的 `hf-trending` JSON / `sec-edgar-api`（需查询设计）；`product-hunt`（needs_token）、
+`yc-companies`（needs_headless）、`gemini-changelog` / `meta-ai-blog` / `perplexity-changelog`（blocked，降级不追）。
