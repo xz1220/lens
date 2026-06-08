@@ -3,63 +3,25 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>lens</title>
+  <title>lens · 信息搜集 · 评阅台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,400&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@400;500;600&family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <!-- ============================================================== -->
-  <!-- PLACEHOLDER UI. This exercises the whole loop so the function   -->
-  <!-- is visible, but the visual/UX design is the NEXT step and is    -->
-  <!-- meant to be driven deliberately. See CLAUDE.md → "下一步".       -->
-  <!-- ============================================================== -->
-  <div id="placeholder-banner">
-    占位前端 · 功能已跑通，视觉 / 交互设计待做 —— 见 CLAUDE.md「下一步：前端设计」
-  </div>
-
-  <header>
-    <strong>lens</strong>
-    <span id="stats" class="muted"></span>
+  <header class="topbar">
+    <div class="brand">
+      <span class="wordmark">lens</span>
+      <span class="brand-sub">信息搜集 · 评阅台</span>
+    </div>
+    <div id="stats" class="stats"></div>
   </header>
 
-  <main>
-    <!-- left rail: filters -->
-    <aside id="rail">
-      <label>状态
-        <select id="f-status">
-          <option value="">全部</option>
-          <option value="captured">captured</option>
-          <option value="reviewed">reviewed</option>
-          <option value="promoted">promoted</option>
-          <option value="ignored">ignored</option>
-        </select>
-      </label>
-      <label>层级
-        <select id="f-tier">
-          <option value="">全部</option>
-          <option value="P0">P0</option>
-          <option value="P1">P1</option>
-          <option value="P2">P2</option>
-          <option value="heat">heat</option>
-        </select>
-      </label>
-      <label>来源 <select id="f-source"><option value="">全部</option></select></label>
-      <label>最低分 <input id="f-minscore" type="number" min="0" max="5" placeholder="0–5" /></label>
-      <label>搜索 <input id="f-q" type="search" placeholder="标题/摘要" /></label>
-      <label>排序
-        <select id="f-sort">
-          <option value="date">按发布时间</option>
-          <option value="score">按评分</option>
-          <option value="fetched">按抓取时间</option>
-        </select>
-      </label>
-      <button id="f-apply">刷新</button>
-    </aside>
-
-    <!-- middle: item list -->
-    <section id="list"></section>
-
-    <!-- right: detail / triage / discuss / idea -->
-    <section id="detail" class="empty">选一条 item</section>
+  <main class="board">
+    <aside id="rail" class="rail"></aside>
+    <section id="list" class="list"></section>
+    <section id="detail" class="detail"></section>
   </main>
 
   <script src="/app.js"></script>
