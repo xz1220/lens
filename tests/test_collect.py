@@ -213,6 +213,136 @@ class TestParseHfDailyPapers(unittest.TestCase):
         self.assertEqual(collect.parse_hf_daily_papers(None), [])
 
 
+class TestParseHfTrending(unittest.TestCase):
+    """HF trending reuses the daily-papers mapper (same /api/daily_papers shape,
+    just `?sort=trending`) but has its own parse entry + fixture."""
+
+    def test_basic(self):
+        recs = collect.parse_hf_trending(fx_json("hf_trending.json"))
+        self.assertEqual(len(recs), 2)
+        first = recs[0]
+        self.assertEqual(first["title"], "Trending Paper One")
+        self.assertEqual(first["url"], "https://huggingface.co/papers/2605.10001")
+        self.assertEqual(first["author"], "Trending Author")
+        self.assertEqual(first["category"], "paper")
+        self.assertEqual(first["published_at"], "2026-05-20T00:00:00+00:00")
+        self.assertIn("▲128", first["summary"])
+        self.assertNotIn("<", first["summary"])  # html stripped
+        # second paper: empty authors + no upvotes
+        self.assertEqual(recs[1]["author"], "")
+        self.assertNotIn("▲", recs[1]["summary"])
+
+    def test_non_list_and_empty_and_malformed(self):
+        self.assertEqual(collect.parse_hf_trending({}), [])
+        self.assertEqual(collect.parse_hf_trending([]), [])
+        self.assertEqual(collect.parse_hf_trending(None), [])
+        self.assertEqual(collect.parse_hf_trending([None, 5]), [])  # non-dict rows skipped
+        # Malformed DICT rows + rows missing every required field must NOT become
+        # blank shell records: the trending contract returns [] on unknown shape.
+        self.assertEqual(collect.parse_hf_trending([{"foo": "bar"}]), [])     # no paper/title/url
+        self.assertEqual(collect.parse_hf_trending([{"paper": {}}]), [])      # empty paper -> no id/title
+        self.assertEqual(collect.parse_hf_trending([{"paper": "bad"}]), [])   # paper wrong type
+        self.assertEqual(collect.parse_hf_trending([{"paper": {"authors": "x"}}]), [])  # id+title missing
+        self.assertEqual(collect.parse_hf_trending([{"paper": {"upvotes": 9}}]), [])    # no id/title/url
+        # CONTRACT: trending records MUST carry an absolute, HF-shaped paper url.
+        # A title-only row (title present, no paper id) collapses to url='' and
+        # must be DROPPED, never emitted as a blank-URL shell record.
+        self.assertEqual(collect.parse_hf_trending([{"title": "T", "paper": {}}]), [])
+        self.assertEqual(collect.parse_hf_trending([{"title": "T"}]), [])  # title, no paper at all
+        self.assertEqual(
+            collect.parse_hf_trending([{"title": "T", "paper": {"upvotes": 5, "authors": []}}]), []
+        )
+        # parse_hf_daily_papers would KEEP a row whose only url is a non-HF
+        # top-level row['url'] fallback (see TestParseHfDailyPapers); trending
+        # must REJECT it because the url is not the HF-shaped papers url.
+        self.assertEqual(collect.parse_hf_daily_papers([{"title": "X", "url": "https://x/y"}])[0]["url"], "https://x/y")
+        self.assertEqual(collect.parse_hf_trending([{"title": "X", "url": "https://x/y"}]), [])
+        self.assertEqual(collect.parse_hf_trending([{"title": "X", "url": "http://huggingface.co/papers/9"}]), [])  # not https
+        self.assertEqual(collect.parse_hf_trending([{"paper": {"id": ""}}]), [])  # empty id -> no url
+        # every kept record's url is absolute + HF-shaped with a real id.
+        for r in collect.parse_hf_trending(fx_json("hf_trending.json")):
+            self.assertTrue(r["url"].startswith("https://huggingface.co/papers/"))
+            self.assertGreater(len(r["url"]), len("https://huggingface.co/papers/"))
+        # CONTRACT: an id-only row maps to a valid HF url but a BLANK title;
+        # that is malformed structure and must be DROPPED, never emitted as a
+        # blank-title shell that save() would persist (url is non-empty).
+        self.assertEqual(collect.parse_hf_trending([{"paper": {"id": "2605.1"}}]), [])
+        self.assertEqual(
+            collect.parse_hf_trending([{"paper": {"id": "2605.1", "upvotes": 9}}]), []
+        )  # id+upvotes but still no title -> dropped
+        # a single malformed row mixed with a valid one (real title + paper id)
+        # keeps only the valid one.
+        recs = collect.parse_hf_trending(
+            [{"title": "T", "paper": {}}, {"title": "Real Paper", "paper": {"id": "2605.1"}}]
+        )
+        self.assertEqual(len(recs), 1)
+        self.assertEqual(recs[0]["title"], "Real Paper")
+        self.assertEqual(recs[0]["url"], "https://huggingface.co/papers/2605.1")
+
+
+class TestParseSecEdgar(unittest.TestCase):
+    """EDGAR full-text-search (efts) response -> filing records, off a trimmed
+    real fixture. Filing-index urls are built from CIK + accession number."""
+
+    def test_basic(self):
+        recs = collect.parse_sec_edgar(fx_json("sec_edgar.json"))
+        # 2 valid hits; the cik-less hit and the source-less hit have no url and
+        # are dropped (never fabricated into rows).
+        self.assertEqual(len(recs), 2)
+        first = recs[0]
+        self.assertEqual(first["title"], "8-K · RadNet, Inc. (RDNT) (CIK 0000790526)")
+        self.assertEqual(
+            first["url"],
+            "https://www.sec.gov/Archives/edgar/data/790526/000168316820000837/0001683168-20-000837-index.htm",
+        )
+        self.assertTrue(first["author"].startswith("RadNet"))
+        self.assertEqual(first["category"], "filing")
+        # bare file_date 2026-03-16 normalized via UTC anchor (tz-stable).
+        self.assertEqual(first["published_at"], "2026-03-16T00:00:00+00:00")
+        self.assertIn("8-K", first["summary"])
+        self.assertIn("filed 2026-03-16", first["summary"])
+        self.assertIn("TRANSCRIPT OF CONFERENCE CALL", first["summary"])
+
+    def test_second_hit_form_and_url(self):
+        recs = collect.parse_sec_edgar(fx_json("sec_edgar.json"))
+        second = recs[1]
+        self.assertTrue(second["title"].startswith("S-1 · Nova AI Labs"))
+        self.assertEqual(
+            second["url"],
+            "https://www.sec.gov/Archives/edgar/data/1999001/000199900126000045/0001999001-26-000045-index.htm",
+        )
+        self.assertEqual(second["published_at"], "2026-05-02T00:00:00+00:00")
+
+    def test_url_builder(self):
+        self.assertEqual(
+            collect._sec_filing_url("0000790526", "0001683168-20-000837"),
+            "https://www.sec.gov/Archives/edgar/data/790526/000168316820000837/0001683168-20-000837-index.htm",
+        )
+        self.assertEqual(collect._sec_filing_url("", "0001-2-3"), "")  # no cik
+        self.assertEqual(collect._sec_filing_url("123", ""), "")       # no adsh
+
+    def test_empty_and_malformed_return_empty(self):
+        self.assertEqual(collect.parse_sec_edgar({}), [])
+        self.assertEqual(collect.parse_sec_edgar(None), [])
+        self.assertEqual(collect.parse_sec_edgar([1, 2]), [])  # non-dict top
+        self.assertEqual(collect.parse_sec_edgar({"hits": None}), [])
+        self.assertEqual(collect.parse_sec_edgar({"hits": "bad"}), [])
+        self.assertEqual(collect.parse_sec_edgar({"hits": {"hits": None}}), [])
+        self.assertEqual(collect.parse_sec_edgar({"hits": {"hits": [1, "x"]}}), [])  # non-dict hits
+        # a hit whose _source isn't a dict degrades to no-url -> dropped, not raised.
+        self.assertEqual(
+            collect.parse_sec_edgar({"hits": {"hits": [{"_id": "a:b", "_source": "bad"}]}}), []
+        )
+        # a _source with ONLY ciks+adsh builds a url but has no form and no
+        # company name -> blank shell, must be dropped (not fabricated into a row).
+        self.assertEqual(
+            collect.parse_sec_edgar(
+                {"hits": {"hits": [{"_source": {"ciks": ["0000790526"], "adsh": "0001683168-20-000837"}}]}}
+            ),
+            [],
+        )
+
+
 class TestParseHnAlgolia(unittest.TestCase):
     def test_basic(self):
         recs = collect.parse_hn_algolia(fx_json("hn_algolia.json"))
@@ -1082,6 +1212,98 @@ class TestHtmlAdaptShells(unittest.TestCase):
         self.assertEqual(self._fetched_url, "https://www.alphaxiv.org/")
         self.assertEqual(len(recs), 3)
         self.assertTrue(recs[0]["url"].startswith("https://www.alphaxiv.org/abs/"))
+
+
+class TestLoop4AdaptShells(unittest.TestCase):
+    """The Loop-4 JSON adapter shells fetch_json() then hand the data to their
+    pure parser — verified with a stubbed fetch_json so the suite stays offline."""
+
+    def _patch_fetch_json(self, payload):
+        orig = collect.fetch_json
+        self._url = None
+        self._ua = None
+
+        def fake(url, ua=None):
+            self._url = url
+            self._ua = ua
+            return payload
+
+        collect.fetch_json = fake
+        self.addCleanup(lambda: setattr(collect, "fetch_json", orig))
+
+    def test_hf_trending_adapt_fetches_then_parses(self):
+        self._patch_fetch_json(fx_json("hf_trending.json"))
+        src = {"key": "hf-trending", "url": "https://huggingface.co/api/daily_papers?sort=trending"}
+        recs = collect.adapt_hf_trending(src)
+        self.assertEqual(self._url, "https://huggingface.co/api/daily_papers?sort=trending")
+        self.assertEqual(len(recs), 2)
+        self.assertEqual(recs[0]["url"], "https://huggingface.co/papers/2605.10001")
+
+    def test_sec_edgar_adapt_appends_rolling_window_and_forwards_ua(self):
+        self._patch_fetch_json(fx_json("sec_edgar.json"))
+        src = {
+            "key": "sec-edgar-api",
+            "url": "https://efts.sec.gov/LATEST/search-index?q=%22artificial%20intelligence%22&forms=8-K",
+            "ua": "lens-intake research <set-your-contact@example.com>",
+        }
+        recs = collect.adapt_sec_edgar(src)
+        # the AI query is preserved and a recent date window is appended with `&`
+        # (the base url already has a `?`); the compliant UA is forwarded to SEC.
+        self.assertIn("q=%22artificial%20intelligence%22", self._url)
+        self.assertIn("&startdt=", self._url)
+        self.assertIn("&enddt=", self._url)
+        self.assertEqual(self._ua, "lens-intake research <set-your-contact@example.com>")
+        self.assertEqual(len(recs), 2)
+        self.assertTrue(recs[0]["url"].startswith("https://www.sec.gov/Archives/edgar/data/"))
+
+    def test_sec_edgar_adapt_window_days_override(self):
+        self._patch_fetch_json({"hits": {"hits": []}})
+        src = {"key": "sec-edgar-api", "url": "https://efts.sec.gov/LATEST/search-index?q=x", "window_days": 30}
+        collect.adapt_sec_edgar(src)
+        # startdt/enddt are valid ISO dates and start precedes end.
+        import re as _re
+        start = _re.search(r"startdt=(\d{4}-\d{2}-\d{2})", self._url).group(1)
+        end = _re.search(r"enddt=(\d{4}-\d{2}-\d{2})", self._url).group(1)
+        self.assertLess(start, end)
+
+
+class TestWiringLoop4(unittest.TestCase):
+    """Loop 4: the last two status=ok JSON sources (sec-edgar, hf-trending) are
+    registered and flipped in sources.yml; the placeholder contact is untouched."""
+
+    def test_loop4_adapters_registered(self):
+        self.assertIn("sec_edgar", collect.ADAPTERS)
+        self.assertIn("hf_trending", collect.ADAPTERS)
+
+    def test_sec_edgar_wired_to_efts_fulltext(self):
+        by_key = {s["key"]: s for s in collect.load_sources()}
+        sec = by_key["sec-edgar-api"]
+        self.assertEqual(sec["adapter"], "sec_edgar")
+        self.assertTrue(collect.wired(sec))
+        self.assertIn("efts.sec.gov", sec["url"])  # full-text-search backend, not submissions
+        # the compliant UA is present and the placeholder email is left for the user.
+        self.assertIn("set-your-contact@example.com", sec["ua"])
+
+    def test_hf_trending_wired_to_json_api(self):
+        by_key = {s["key"]: s for s in collect.load_sources()}
+        hft = by_key["hf-trending"]
+        self.assertEqual(hft["adapter"], "hf_trending")
+        self.assertTrue(collect.wired(hft))
+        # a real JSON API endpoint, not the HTML /papers/trending page.
+        self.assertIn("api/daily_papers", hft["url"])
+        self.assertIn("trending", hft["url"])
+
+    def test_wired_count_is_26(self):
+        # Loop 4 brings the wired (status ok + adapter registered) tally to 26.
+        wired = [s for s in collect.load_sources() if collect.wired(s)]
+        self.assertEqual(len(wired), 26)
+
+    def test_remaining_pending_are_only_degraded(self):
+        # The only un-wired sources left are honestly degraded (token/headless/
+        # blocked) — nothing `ok` should still be sitting on adapter: null.
+        for s in collect.load_sources():
+            if not collect.wired(s):
+                self.assertIn(s.get("status"), ("needs_token", "needs_headless", "blocked"))
 
 
 if __name__ == "__main__":

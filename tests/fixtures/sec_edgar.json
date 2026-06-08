@@ -1,0 +1,50 @@
+{
+  "took": 42,
+  "timed_out": false,
+  "hits": {
+    "total": {"value": 2077, "relation": "gte"},
+    "hits": [
+      {
+        "_id": "0001683168-20-000837:radnet_8k-ex9901.htm",
+        "_score": 19.6,
+        "_source": {
+          "ciks": ["0000790526"],
+          "display_names": ["RadNet, Inc.  (RDNT)  (CIK 0000790526)"],
+          "file_date": "2026-03-16",
+          "root_forms": ["8-K"],
+          "form": "8-K",
+          "adsh": "0001683168-20-000837",
+          "file_type": "EX-99.1",
+          "file_description": "TRANSCRIPT OF CONFERENCE CALL"
+        }
+      },
+      {
+        "_id": "0001999001-26-000045:nova_s1.htm",
+        "_score": 14.2,
+        "_source": {
+          "ciks": ["0001999001"],
+          "display_names": ["Nova AI Labs, Inc.  (NOVA)  (CIK 0001999001)"],
+          "file_date": "2026-05-02",
+          "root_forms": ["S-1"],
+          "form": "S-1",
+          "adsh": "0001999001-26-000045",
+          "file_type": "S-1",
+          "file_description": "REGISTRATION STATEMENT"
+        }
+      },
+      {
+        "_id": "0000000000-26-000000:no-cik.htm",
+        "_source": {
+          "ciks": [],
+          "display_names": ["Mystery Co"],
+          "file_date": "2026-05-10",
+          "form": "424B",
+          "adsh": "0000000000-26-000000"
+        }
+      },
+      {
+        "_id": "broken-hit-no-source"
+      }
+    ]
+  }
+}

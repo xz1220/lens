@@ -17,7 +17,7 @@ meta:
   verified_on: "2026-06-05"
   provenance: "life-os: intake/topics/ai-and-ai-agent/research/2026-06-05-workflow.md"
   total: 31
-  wired_adapters: [generic_feed, hf_daily_papers, hn_algolia, ossinsight, yc_launches, hf_models, github_releases, claude_release_notes, mistral_changelog, a16z_portfolio, anthropic_next, alphaxiv]
+  wired_adapters: [generic_feed, hf_daily_papers, hf_trending, sec_edgar, hn_algolia, ossinsight, yc_launches, hf_models, github_releases, claude_release_notes, mistral_changelog, a16z_portfolio, anthropic_next, alphaxiv]
 
 sources:
   # ---------- P0: machine-first primary ----------
@@ -155,15 +155,15 @@ sources:
     notes: 页面是 JS，但这个 API 直接给 ~50 条带 upvote/日期。社区排序层。
 
   - key: sec-edgar-api
-    name: SEC EDGAR API (submissions / full-text)
+    name: SEC EDGAR Full-Text Search (AI filings)
     tier: P0
     category: filing
-    url: https://data.sec.gov/submissions/
+    url: "https://efts.sec.gov/LATEST/search-index?q=%22artificial%20intelligence%22&forms=8-K%2CS-1%2C424B"
     method: json
-    adapter: null
+    adapter: sec_edgar
     status: ok
     ua: "lens-intake research <set-your-contact@example.com>"
-    notes: submissions JSON + 全文检索 efts.sec.gov 都通（需合规 UA）。需设计查询。
+    notes: 用 EDGAR 全文检索后端 efts.sec.gov/LATEST/search-index（非 submissions 全量）。查询=短语 "artificial intelligence" + forms=8-K,S-1,424B，定向捞「提到 AI 的新 filing」（sec-latest-filings 已覆盖全量噪声）。adapter 追加滚动近 90 天 startdt/enddt，重跑只增新条。需合规 UA（src.ua，403 否则）——别动占位 email，留给用户填。
 
   - key: sec-latest-filings
     name: SEC Latest Filings (Atom)
@@ -249,14 +249,14 @@ sources:
     notes: arXiv 讨论层，验证热度用，不替代 arXiv。实测 explore 流服务端渲染：paper 标题 + /abs/ 链接 + 日期在 DOM 里（摘要只在不可解析的 JS flight blob 中，丢弃）。标准库正则解析，class 名是 utility/hash，结构变动可能失效。
 
   - key: hf-trending
-    name: HF Trending / Papers with Code
+    name: HF Trending Papers
     tier: P2
     category: paper
-    url: https://huggingface.co/papers/trending
+    url: https://huggingface.co/api/daily_papers?sort=trending
     method: json
-    adapter: null
+    adapter: hf_trending
     status: ok
-    notes: paperswithcode 已重定向到 HF trending；走 HF API 验证代码/benchmark。
+    notes: 实测 trending 就是 daily_papers 端点按 trending 排序（/api/daily_papers?sort=trending，非 HTML /papers/trending 页），同形 JSON。复用 hf_daily_papers 解析逻辑，但独立 adapter 入口 + fixture。社区热度排序层。
 
   - key: yc-companies
     name: YC Companies

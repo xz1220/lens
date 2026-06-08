@@ -1,0 +1,22 @@
+[
+  {
+    "title": "Trending Paper One",
+    "publishedAt": "2026-05-20T00:00:00.000Z",
+    "paper": {
+      "id": "2605.10001",
+      "title": "Trending Paper One Full Title",
+      "summary": "<p>A trending abstract with <b>markup</b> &amp; entities</p>",
+      "upvotes": 128,
+      "authors": [{"name": "Trending Author"}, {"name": "Co Author"}]
+    }
+  },
+  {
+    "title": "Trending Paper Two",
+    "publishedAt": "2026-05-19T00:00:00.000Z",
+    "paper": {
+      "id": "2605.10002",
+      "summary": "Second trending abstract",
+      "authors": []
+    }
+  }
+]

@@ -13,7 +13,7 @@
   - `blocked` —— 当前抓不到（OAuth 墙 / bot 拦截），已降级不追
 - **adapter** —— `collect.py` 里负责采它的 handler；`null` = 源是真的、采集还没接（最自然的下一批任务）。
 
-当前 **24 个已接通**（adapter 非 null 且 status=ok），**7 个待接**。
+当前 **26 个已接通**（adapter 非 null 且 status=ok），**5 个待接**。
 
 ## P0 · 机器优先源（15）
 
@@ -32,7 +32,7 @@
 | Perplexity Changelog | `perplexity.ai/changelog` | html | **blocked** | — | 403 Cloudflare，降级不追 |
 | arXiv (cs.CL/LG/AI) | `rss.arxiv.org/rss/cs.CL` | rss | ok | generic_feed | 三个子类，原始日更，噪声高 |
 | HF Daily Papers | `huggingface.co/api/daily_papers` | json | ok | hf_daily_papers | API 直给 50 条带 upvote |
-| SEC EDGAR API | `data.sec.gov/submissions/` | json | ok | — | 需合规 UA + 查询设计 |
+| SEC EDGAR FTS | `efts.sec.gov/LATEST/search-index?q="artificial intelligence"&forms=8-K,S-1,424B` | json | ok | sec_edgar | 全文检索后端，定向捞提到 AI 的新 filing；合规 UA + adapter 追加滚动近 90 天窗口 |
 | SEC Latest Filings | `sec.gov/cgi-bin/browse-edgar?...&output=atom` | atom | ok | generic_feed | 带合规 UA 即通（曾误记 403）|
 
 ## P1 · 专家自有源（6）
@@ -51,7 +51,7 @@
 | 源 | 入口 | method | status | adapter | 备注 |
 |---|---|---|---|---|---|
 | alphaXiv | `alphaxiv.org` | html | ok | alphaxiv | arXiv 讨论层；explore 流服务端渲染（标题 + /abs/ 链接 + 日期在 DOM，摘要在不可解析 JS blob 丢弃）（HTML 抓取，结构变动可能失效）|
-| HF Trending | `huggingface.co/papers/trending` | json | ok | — | 验证代码/benchmark |
+| HF Trending | `huggingface.co/api/daily_papers?sort=trending` | json | ok | hf_trending | trending 即 daily_papers 按 trending 排序，同形 JSON；复用解析、独立入口 |
 | YC Companies | `ycombinator.com/companies` | html | needs_headless | — | Algolia，需 headless |
 | a16z Portfolio | `a16z.com/portfolio/` | html | ok | a16z_portfolio | 服务端渲染，data-company 内嵌 JSON（HTML 抓取，结构变动可能失效）|
 
@@ -76,5 +76,7 @@
 a16z 三个 SSR HTML 源（标准库解析）；Loop 3 接了 Anthropic 三博客（共用 `anthropic_next`——实测站点已迁
 App Router，无 `__NEXT_DATA__`，抓服务端渲染卡片，parser 仍保留 `__NEXT_DATA__` JSON 快路径）、alphaXiv
 （explore 流 SSR），并把 `karpathy` 从抓不出列表的主页改指其 bearblog 官方 Atom（走 generic_feed）。
-剩下 7 个待接：`ok` 但没接的 `hf-trending` JSON / `sec-edgar-api`（需查询设计）；`product-hunt`（needs_token）、
-`yc-companies`（needs_headless）、`gemini-changelog` / `meta-ai-blog` / `perplexity-changelog`（blocked，降级不追）。
+Loop 4 接了最后两个 `status=ok` 的 JSON 源：`sec-edgar-api`（efts 全文检索，AI 短语 + form 过滤 + 滚动近
+90 天窗口，合规 UA）和 `hf-trending`（daily_papers 的 trending 排序，同形复用解析）。
+剩下 5 个待接全是诚实降级、不追：`product-hunt`（needs_token）、`yc-companies`（needs_headless）、
+`gemini-changelog` / `meta-ai-blog` / `perplexity-changelog`（blocked）。

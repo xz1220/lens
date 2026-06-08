@@ -28,7 +28,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -303,6 +303,37 @@ def adapt_hf_daily_papers(src: dict) -> list[dict]:
     return parse_hf_daily_papers(fetch_json(src["url"], ua=src.get("ua")))
 
 
+_HF_PAPERS_PREFIX = "https://huggingface.co/papers/"
+
+
+def parse_hf_trending(data) -> list[dict]:
+    """HF trending papers -> paper records.
+
+    Verified live: the trending feed is the daily-papers endpoint re-sorted
+    (`/api/daily_papers?sort=trending`), so each row carries the SAME shape
+    (top-level title/publishedAt + a nested `paper` with id/summary/upvotes/
+    authors). We reuse parse_hf_daily_papers' field mapper rather than
+    duplicate it, but enforce a STRICTER contract here: a record is kept ONLY
+    when it carries BOTH (a) a non-empty paper title and (b) an ABSOLUTE,
+    HF-shaped paper url (`https://huggingface.co/papers/<id>`, i.e. the row
+    actually carried a paper id). A title-only row collapses to url='' (or to
+    parse_hf_daily_papers' non-HF row['url'] fallback); an id-only row maps to
+    a valid url but a blank title. Either way the row is unknown / malformed
+    structure for this source, so it is dropped (-> []) rather than emitted as
+    a blank-title or blank-URL shell that save() would persist. This source
+    owns its own adapter + fixture and can diverge later."""
+    return [
+        r for r in parse_hf_daily_papers(data)
+        if r["title"]
+        and r["url"].startswith(_HF_PAPERS_PREFIX)
+        and len(r["url"]) > len(_HF_PAPERS_PREFIX)
+    ]
+
+
+def adapt_hf_trending(src: dict) -> list[dict]:
+    return parse_hf_trending(fetch_json(src["url"], ua=src.get("ua")))
+
+
 def parse_hn_algolia(data) -> list[dict]:
     hits = data.get("hits") if isinstance(data, dict) else None
     out = []
@@ -457,6 +488,105 @@ def adapt_github_releases(src: dict) -> list[dict]:
     if errors and not out:
         raise errors[-1]
     return out
+
+
+# --------------------------------------------------------------------------- #
+# SEC EDGAR full-text search (efts.sec.gov) — AI-relevant filings.
+#
+# `sec-latest-filings` already firehoses *every* new filing (Atom/generic_feed);
+# this source is the deliberate opposite: a TARGETED full-text query for filings
+# that actually mention AI. efts.sec.gov/LATEST/search-index is EDGAR's
+# full-text-search backend; it answers a plain GET with
+#   {"hits": {"total": {...}, "hits": [ {"_id": "<adsh>:<file>", "_source": {…}} ]}}.
+# SEC *mandates* a descriptive User-Agent (a contact string) or it 403s — the
+# yml carries it in `ua` and fetch() forwards it. Defensive throughout: an
+# unrecognized payload yields [] instead of throwing.
+# --------------------------------------------------------------------------- #
+SEC_ARCHIVES = "https://www.sec.gov/Archives/edgar/data"
+
+
+def _sec_filing_url(cik: str, adsh: str) -> str:
+    """Canonical EDGAR filing-index URL from a CIK + accession number (adsh).
+
+    cik '0000790526' + adsh '0001683168-20-000837' ->
+    https://www.sec.gov/Archives/edgar/data/790526/000168316820000837/0001683168-20-000837-index.htm
+    Returns '' when either part is missing — the caller then drops the record
+    (no url to save, no fabricated link)."""
+    cik = (cik or "").lstrip("0")
+    adsh = (adsh or "").strip()
+    if not cik or not adsh:
+        return ""
+    folder = adsh.replace("-", "")
+    return f"{SEC_ARCHIVES}/{cik}/{folder}/{adsh}-index.htm"
+
+
+def parse_sec_edgar(data) -> list[dict]:
+    """EDGAR full-text-search (efts) response -> filing records. No network.
+
+    Each hit's `_source` carries the company (display_names), CIK (ciks[0]),
+    form, accession (adsh) and file_date; the filing-index url is built from
+    CIK + adsh. A hit with no CIK/adsh produces no url and is skipped. Unknown /
+    malformed structure -> [] (never raises, never invents data).
+    """
+    if not isinstance(data, dict):
+        return []
+    hits = data.get("hits")
+    rows = hits.get("hits") if isinstance(hits, dict) else None
+    out: list[dict] = []
+    for hit in rows if isinstance(rows, list) else []:
+        if not isinstance(hit, dict):
+            continue
+        src = hit.get("_source")
+        if not isinstance(src, dict):
+            src = {}
+        ciks = src.get("ciks")
+        cik = _as_str(ciks[0]) if isinstance(ciks, list) and ciks else ""
+        url = _sec_filing_url(cik, _as_str(src.get("adsh")))
+        if not url:
+            continue
+        names = src.get("display_names")
+        company = re.sub(r"\s+", " ", _as_str(names[0])) if isinstance(names, list) and names else ""
+        roots = src.get("root_forms")
+        form = _as_str(src.get("form")) or (_as_str(roots[0]) if isinstance(roots, list) and roots else "")
+        title = " · ".join(b for b in (form, company) if b)
+        # A hit that carries only ciks+adsh (so the url builds) but no form and
+        # no company name has no human-identifiable content — emitting it would
+        # be a blank shell ("· · index.htm"). Drop it: unknown/malformed source
+        # -> skipped, never fabricated into a row.
+        if not title:
+            continue
+        desc = _as_str(src.get("file_description") or src.get("file_type"))
+        # file_date is a bare calendar date; anchor to UTC midnight before
+        # norm_date so the ISO result is stable regardless of the collector's
+        # local timezone (a naive date would be read as local time and shift).
+        fd = _iso_date(src.get("file_date"))
+        summary = " · ".join(b for b in (form, f"filed {fd}" if fd else "", desc) if b)
+        out.append({
+            "title": title,
+            "url": url,
+            "summary": summary,
+            "author": company,
+            "published_at": norm_date(f"{fd}T00:00:00Z") if fd else None,
+            "category": "filing",
+        })
+    return out
+
+
+def adapt_sec_edgar(src: dict) -> list[dict]:
+    """efts full-text search for AI-relevant filings.
+
+    src['url'] already carries the AI-phrase query + form filter; we append a
+    rolling recent date window (default last 90 days) so re-runs surface NEWLY
+    filed documents — INSERT-OR-IGNORE then adds only the unseen ones — rather
+    than a frozen all-time relevance list. SEC needs a descriptive UA, passed
+    through from src['ua']."""
+    url = src["url"]
+    days = src.get("window_days", 90)
+    end = datetime.now(timezone.utc).date()
+    start = end - timedelta(days=days)
+    sep = "&" if "?" in url else "?"
+    url = f"{url}{sep}startdt={start.isoformat()}&enddt={end.isoformat()}"
+    return parse_sec_edgar(fetch_json(url, ua=src.get("ua")))
 
 
 # --------------------------------------------------------------------------- #
@@ -840,6 +970,8 @@ def adapt_alphaxiv(src: dict) -> list[dict]:
 ADAPTERS = {
     "generic_feed": adapt_generic_feed,
     "hf_daily_papers": adapt_hf_daily_papers,
+    "hf_trending": adapt_hf_trending,
+    "sec_edgar": adapt_sec_edgar,
     "hn_algolia": adapt_hn_algolia,
     "ossinsight": adapt_ossinsight,
     "yc_launches": adapt_yc_launches,
