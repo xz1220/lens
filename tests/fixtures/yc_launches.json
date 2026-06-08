@@ -1,0 +1,19 @@
+{
+  "hits": [
+    {
+      "title": "Launch One",
+      "slug": "launch-one",
+      "tagline": "<b>Cool</b> product tagline",
+      "total_vote_count": 30,
+      "company": {"name": "CoolCo"},
+      "created_at": "2025-06-04T12:00:00.000Z"
+    },
+    {
+      "title": "Launch Two",
+      "search_path": "/launches/launch-two",
+      "tagline": "Another tagline",
+      "company": "PlainCo",
+      "created_at": "2025-06-04T13:00:00.000Z"
+    }
+  ]
+}

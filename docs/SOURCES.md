@@ -13,7 +13,7 @@
   - `blocked` —— 当前抓不到（OAuth 墙 / bot 拦截），已降级不追
 - **adapter** —— `collect.py` 里负责采它的 handler；`null` = 源是真的、采集还没接（最自然的下一批任务）。
 
-当前 **14 个已接通**（adapter 非 null 且 status=ok），**17 个待接**。
+当前 **16 个已接通**（adapter 非 null 且 status=ok），**15 个待接**。
 
 ## P0 · 机器优先源（15）
 
@@ -60,8 +60,8 @@
 | 源 | 入口 | method | status | adapter | 备注 |
 |---|---|---|---|---|---|
 | HN (Algolia) | `hn.algolia.com/api/v1/search_by_date?tags=story` | json | ok | hn_algolia | 讨论热度，回链一手 |
-| HF Hub API | `huggingface.co/api/models?sort=createdAt` | json | ok | — | 模型/dataset/Space |
-| GitHub Releases | `api.github.com/repos/{repo}/releases` | json | ok | — | 需先填 watchlist |
+| HF Hub API | `huggingface.co/api/models?sort=createdAt` | json | ok | hf_models | 模型/dataset/Space 的新建/下载/likes |
+| GitHub Releases | `api.github.com/repos/{repo}/releases` | json | ok | github_releases | 遍历 watchlist（6 个高信号 AI repo），per-repo 错误隔离 |
 | GitHub Trending (OSSInsight) | `api.ossinsight.io/v1/trends/repos/?period=past_week` | json | ok | ossinsight | 补 GitHub 无 trending API |
 | Product Hunt | `api.producthunt.com/v2/api/graphql` | json | needs_token | — | GraphQL 需 OAuth token |
 | YC Launches | `ycombinator.com/launches`（Accept: json）| json | ok | yc_launches | 偏创业/投融资线索 |

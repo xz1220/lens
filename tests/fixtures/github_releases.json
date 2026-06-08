@@ -1,0 +1,25 @@
+[
+  {
+    "tag_name": "v1.2.0",
+    "name": "Version 1.2.0",
+    "html_url": "https://github.com/owner/repo/releases/tag/v1.2.0",
+    "body": "<h2>Changes</h2> Bug fixes &amp; more improvements",
+    "author": {"login": "maintainer"},
+    "published_at": "2025-06-06T00:00:00Z",
+    "draft": false
+  },
+  {
+    "tag_name": "v1.1.0-rc",
+    "name": "Draft cut",
+    "html_url": "https://github.com/owner/repo/releases/tag/v1.1.0-rc",
+    "body": "should be skipped (draft)",
+    "draft": true
+  },
+  {
+    "tag_name": "v1.0.0",
+    "name": "Version 1.0.0",
+    "html_url": "",
+    "body": "no html_url -> skipped",
+    "draft": false
+  }
+]

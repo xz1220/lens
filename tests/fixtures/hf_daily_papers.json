@@ -1,0 +1,22 @@
+[
+  {
+    "title": "Paper One",
+    "publishedAt": "2025-06-01T00:00:00.000Z",
+    "paper": {
+      "id": "2506.00001",
+      "title": "Paper One Full Title",
+      "summary": "<p>Abstract text with <i>markup</i> &amp; entities</p>",
+      "upvotes": 42,
+      "authors": [{"name": "Researcher A"}, {"name": "Researcher B"}]
+    }
+  },
+  {
+    "title": "Paper Two",
+    "publishedAt": "2025-06-02T00:00:00.000Z",
+    "paper": {
+      "id": "2506.00002",
+      "summary": "Second abstract",
+      "authors": []
+    }
+  }
+]

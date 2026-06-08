@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Atom Example</title>
+  <link rel="self" href="https://example.org/atom"/>
+  <entry>
+    <title>Atom One</title>
+    <link rel="alternate" href="https://example.org/atom-one"/>
+    <link rel="edit" href="https://example.org/edit/atom-one"/>
+    <summary>A short &amp; tidy summary</summary>
+    <updated>2025-06-04T10:00:00Z</updated>
+    <author><name>Alice</name></author>
+  </entry>
+  <entry>
+    <title>Atom Two</title>
+    <link href="https://example.org/atom-two"/>
+    <content>Inline content body</content>
+    <published>2025-06-05T11:00:00Z</published>
+  </entry>
+</feed>

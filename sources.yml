@@ -17,7 +17,7 @@ meta:
   verified_on: "2026-06-05"
   provenance: "life-os: intake/topics/ai-and-ai-agent/research/2026-06-05-workflow.md"
   total: 31
-  wired_adapters: [generic_feed, hf_daily_papers, hn_algolia, ossinsight, yc_launches]
+  wired_adapters: [generic_feed, hf_daily_papers, hn_algolia, ossinsight, yc_launches, hf_models, github_releases]
 
 sources:
   # ---------- P0: machine-first primary ----------
@@ -295,7 +295,7 @@ sources:
     category: repo
     url: "https://huggingface.co/api/models?sort=createdAt&direction=-1&limit=50"
     method: json
-    adapter: null
+    adapter: hf_models
     status: ok
     notes: 模型/dataset/Space 的创建/下载/likes。paper 仍回 arXiv。
 
@@ -305,10 +305,16 @@ sources:
     category: repo
     url: https://api.github.com/repos/{repo}/releases
     method: json
-    adapter: null
+    adapter: github_releases
     status: ok
-    watchlist: []
-    notes: 只盯已知 repo 的发版；发现新 repo 用 ossinsight。需先填 watchlist。
+    watchlist:
+      - anthropics/anthropic-sdk-python
+      - openai/openai-python
+      - ggml-org/llama.cpp
+      - vllm-project/vllm
+      - huggingface/transformers
+      - langchain-ai/langchain
+    notes: 只盯已知 repo 的发版；发现新 repo 用 ossinsight。watchlist 是高信号 AI repo，按需增删。
 
   - key: ossinsight-trending
     name: GitHub Trending (OSSInsight)

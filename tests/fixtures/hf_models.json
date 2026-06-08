@@ -1,0 +1,28 @@
+[
+  {
+    "id": "org-name/cool-model",
+    "downloads": 12345,
+    "likes": 678,
+    "pipeline_tag": "text-generation",
+    "library_name": "transformers",
+    "createdAt": "2025-06-05T08:00:00.000Z"
+  },
+  {
+    "id": "solomodel",
+    "downloads": 10,
+    "likes": 2,
+    "library_name": "diffusers",
+    "createdAt": "2025-06-05T09:00:00.000Z"
+  },
+  {
+    "id": "bare/model",
+    "downloads": 0,
+    "likes": 0,
+    "createdAt": "2025-06-05T10:00:00.000Z"
+  },
+  {
+    "downloads": 5,
+    "likes": 1,
+    "pipeline_tag": "image-classification"
+  }
+]

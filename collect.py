@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import json
 import re
 import sqlite3
@@ -52,6 +53,20 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _as_str(value) -> str:
+    """Coerce an arbitrary (possibly malformed) JSON scalar to a clean string.
+
+    External feeds occasionally hand us an int/None/dict where a string is
+    expected; every field that ends up calling `.strip()` goes through here so
+    a wrong-typed value degrades to text instead of throwing. None -> "".
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return str(value).strip()
+
+
 def fetch(url: str, ua: str | None = None, timeout: int = 30, accept: str = "*/*",
           retries: int = 3) -> bytes:
     """GET with a few retries — feeds drop TLS / time out transiently."""
@@ -73,13 +88,14 @@ def fetch_json(url: str, ua: str | None = None):
     return json.loads(fetch(url, ua=ua, accept="application/json").decode("utf-8", "replace"))
 
 
-def strip_html(text: str | None, limit: int = 600) -> str:
+def strip_html(text, limit: int = 600) -> str:
     if not text:
         return ""
+    if not isinstance(text, str):  # tolerate ints / other scalars from feeds
+        text = str(text)
     text = re.sub(r"(?is)<script.*?</script>|<style.*?</style>", " ", text)
     text = re.sub(r"(?s)<[^>]+>", " ", text)
-    text = re.sub(r"&nbsp;", " ", text)
-    text = re.sub(r"&amp;", "&", text)
+    text = html.unescape(text)  # &quot; &lt; &#39; &nbsp; &amp; ... all decoded
     text = re.sub(r"\s+", " ", text).strip()
     return text[:limit]
 
@@ -88,6 +104,8 @@ def norm_date(raw: str | None) -> str | None:
     """Best-effort -> ISO8601. Falls back to the raw string, never raises."""
     if not raw:
         return None
+    if not isinstance(raw, str):  # numeric/odd timestamps shouldn't crash
+        raw = str(raw)
     raw = raw.strip()
     # RFC 822 (RSS pubDate)
     try:
@@ -114,6 +132,26 @@ def localname(tag: str) -> str:
 # adapters — each returns a list of normalized record dicts:
 #   {title, url, summary, author, published_at, category?}
 # --------------------------------------------------------------------------- #
+# Each adapter is a thin shell: `fetch(...)` the bytes/JSON, then hand off to a
+# pure `parse_*` function that takes already-fetched data and never touches the
+# network. The parse functions are what the test suite drives off local
+# fixtures; ADAPTERS still points at the `adapt_*` shells so runtime behavior is
+# unchanged.
+def parse_generic_feed(raw) -> list[dict]:
+    """Parse one already-fetched RSS 2.0 or Atom document. No network.
+
+    Malformed / empty / non-XML input yields [] rather than throwing — a junk
+    response (HTML error page, truncated body) must not break the parse layer.
+    """
+    if not raw:
+        return []
+    try:
+        root = ET.fromstring(raw)
+    except (ET.ParseError, TypeError, ValueError):
+        return []
+    return _parse_atom(root) if localname(root.tag) == "feed" else _parse_rss(root)
+
+
 def adapt_generic_feed(src: dict) -> list[dict]:
     """RSS 2.0 and Atom, namespace-agnostic. Handles `extra_urls` too.
 
@@ -127,8 +165,7 @@ def adapt_generic_feed(src: dict) -> list[dict]:
     errors: list[Exception] = []
     for url in urls:
         try:
-            root = ET.fromstring(fetch(url, ua=src.get("ua")))
-            out.extend(_parse_atom(root) if localname(root.tag) == "feed" else _parse_rss(root))
+            out.extend(parse_generic_feed(fetch(url, ua=src.get("ua"))))
         except Exception as exc:
             errors.append(exc)
             print(f"      · sub-feed skipped: {url} ({type(exc).__name__})")
@@ -188,19 +225,22 @@ def _parse_atom(root: ET.Element) -> list[dict]:
     return out
 
 
-def adapt_hf_daily_papers(src: dict) -> list[dict]:
-    data = fetch_json(src["url"], ua=src.get("ua"))
+def parse_hf_daily_papers(data) -> list[dict]:
     out = []
     for row in data if isinstance(data, list) else []:
-        paper = row.get("paper", {}) or {}
-        pid = paper.get("id", "")
-        authors = paper.get("authors") or []
+        if not isinstance(row, dict):
+            continue
+        paper = row.get("paper")
+        if not isinstance(paper, dict):  # e.g. {"paper": "bad"} or missing
+            paper = {}
+        pid = _as_str(paper.get("id"))
+        authors = paper.get("authors")
         author = ""
-        if authors and isinstance(authors[0], dict):
-            author = authors[0].get("name", "")
+        if isinstance(authors, list) and authors and isinstance(authors[0], dict):
+            author = _as_str(authors[0].get("name"))
         out.append({
-            "title": (row.get("title") or paper.get("title") or "").strip(),
-            "url": f"https://huggingface.co/papers/{pid}" if pid else (row.get("url") or ""),
+            "title": _as_str(row.get("title") or paper.get("title")),
+            "url": f"https://huggingface.co/papers/{pid}" if pid else _as_str(row.get("url")),
             "summary": strip_html(paper.get("summary")) + (f"  [▲{paper.get('upvotes')}]" if paper.get("upvotes") is not None else ""),
             "author": author,
             "published_at": norm_date(row.get("publishedAt")),
@@ -209,35 +249,52 @@ def adapt_hf_daily_papers(src: dict) -> list[dict]:
     return out
 
 
-def adapt_hn_algolia(src: dict) -> list[dict]:
-    data = fetch_json(src["url"], ua=src.get("ua"))
+def adapt_hf_daily_papers(src: dict) -> list[dict]:
+    return parse_hf_daily_papers(fetch_json(src["url"], ua=src.get("ua")))
+
+
+def parse_hn_algolia(data) -> list[dict]:
+    hits = data.get("hits") if isinstance(data, dict) else None
     out = []
-    for hit in data.get("hits", []):
-        oid = hit.get("objectID", "")
-        url = hit.get("url") or f"https://news.ycombinator.com/item?id={oid}"
+    for hit in hits if isinstance(hits, list) else []:  # tolerate {"hits": null}
+        if not isinstance(hit, dict):
+            continue
+        oid = _as_str(hit.get("objectID"))
+        url = _as_str(hit.get("url")) or f"https://news.ycombinator.com/item?id={oid}"
         out.append({
-            "title": (hit.get("title") or "").strip(),
+            "title": _as_str(hit.get("title")),
             "url": url,
             "summary": f"{hit.get('points', 0)} points · {hit.get('num_comments', 0)} comments · hn.algolia.com/item?id={oid}",
-            "author": hit.get("author", ""),
+            "author": _as_str(hit.get("author")),
             "published_at": norm_date(hit.get("created_at")),
             "category": "other",
         })
     return out
 
 
-def adapt_ossinsight(src: dict) -> list[dict]:
-    data = fetch_json(src["url"], ua=src.get("ua"))
-    rows = (data.get("data", {}) or {}).get("rows") or data.get("rows") or []
+def adapt_hn_algolia(src: dict) -> list[dict]:
+    return parse_hn_algolia(fetch_json(src["url"], ua=src.get("ua")))
+
+
+def parse_ossinsight(data) -> list[dict]:
+    if not isinstance(data, dict):
+        return []
+    # `data["data"]` is normally {"rows": [...]} but a malformed response may
+    # hand us a string/list/None there — only dig into it when it's a dict, then
+    # fall back to a top-level `rows`, so a junk nested value yields [] not a raise.
+    nested = data.get("data")
+    rows = (nested.get("rows") if isinstance(nested, dict) else None) or data.get("rows") or []
     out = []
-    for r in rows:
-        repo = r.get("repo_name", "")
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict):
+            continue
+        repo = _as_str(r.get("repo_name"))
         if not repo:
             continue
         out.append({
             "title": repo,
             "url": f"https://github.com/{repo}",
-            "summary": f"{(r.get('description') or '').strip()}  [★{r.get('stars')} · fork {r.get('forks')} · {r.get('language') or '—'}]",
+            "summary": f"{_as_str(r.get('description'))}  [★{r.get('stars')} · fork {r.get('forks')} · {r.get('language') or '—'}]",
             "author": repo.split("/")[0],
             "published_at": None,
             "category": "repo",
@@ -245,27 +302,111 @@ def adapt_ossinsight(src: dict) -> list[dict]:
     return out
 
 
-def adapt_yc_launches(src: dict) -> list[dict]:
-    """YC /launches returns an Algolia-style {hits:[...]} when Accept: application/json."""
-    data = fetch_json(src["url"], ua=src.get("ua"))
-    hits = data.get("hits", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+def adapt_ossinsight(src: dict) -> list[dict]:
+    return parse_ossinsight(fetch_json(src["url"], ua=src.get("ua")))
+
+
+def parse_yc_launches(data) -> list[dict]:
+    if isinstance(data, dict):
+        hits = data.get("hits")  # may be null
+    elif isinstance(data, list):
+        hits = data
+    else:
+        hits = None
     out = []
-    for h in hits:
+    for h in hits if isinstance(hits, list) else []:  # tolerate {"hits": null}
         if not isinstance(h, dict):
             continue
-        slug = h.get("slug") or ""
-        path = h.get("search_path") or (f"/launches/{slug}" if slug else "")
+        slug = _as_str(h.get("slug"))
+        path = _as_str(h.get("search_path")) or (f"/launches/{slug}" if slug else "")
         company = h.get("company")
-        author = company.get("name") if isinstance(company, dict) else (company or "")
+        author = _as_str(company.get("name")) if isinstance(company, dict) else _as_str(company)
         out.append({
-            "title": (h.get("title") or "").strip(),
+            "title": _as_str(h.get("title")),
             "url": f"https://www.ycombinator.com{path}" if path else "",
             "summary": strip_html(h.get("tagline")) + (f"  [▲{h.get('total_vote_count')}]" if h.get("total_vote_count") is not None else ""),
-            "author": author or "",
+            "author": author,
             "published_at": norm_date(h.get("created_at")),
             "category": "launch",
         })
     return [r for r in out if r["url"] or r["title"]]
+
+
+def adapt_yc_launches(src: dict) -> list[dict]:
+    """YC /launches returns an Algolia-style {hits:[...]} when Accept: application/json."""
+    return parse_yc_launches(fetch_json(src["url"], ua=src.get("ua")))
+
+
+def parse_hf_models(data) -> list[dict]:
+    """HF Hub /api/models -> repo records. Skips entries with no model id."""
+    out = []
+    for m in data if isinstance(data, list) else []:
+        if not isinstance(m, dict):
+            continue
+        mid = _as_str(m.get("id") or m.get("modelId"))  # tolerate non-str ids
+        if not mid:
+            continue
+        downloads = m.get("downloads")
+        likes = m.get("likes")
+        kind = m.get("pipeline_tag") or m.get("library_name") or "—"
+        out.append({
+            "title": mid,
+            "url": f"https://huggingface.co/{mid}",
+            "summary": f"[↓{downloads if downloads is not None else 0} · ♥{likes if likes is not None else 0} · {kind}]",
+            "author": mid.split("/")[0] if "/" in mid else mid,
+            "published_at": norm_date(m.get("createdAt")),
+            "category": "repo",
+        })
+    return out
+
+
+def adapt_hf_models(src: dict) -> list[dict]:
+    return parse_hf_models(fetch_json(src["url"], ua=src.get("ua")))
+
+
+def parse_github_releases(releases, repo: str) -> list[dict]:
+    """GitHub /repos/{repo}/releases -> repo records. Skips drafts and
+    releases with no html_url. `repo` is the owner/name this list came from."""
+    out = []
+    for rel in releases if isinstance(releases, list) else []:
+        if not isinstance(rel, dict) or rel.get("draft"):
+            continue
+        html_url = _as_str(rel.get("html_url"))
+        if not html_url:
+            continue
+        label = _as_str(rel.get("tag_name") or rel.get("name"))
+        author = ""
+        who = rel.get("author")
+        if isinstance(who, dict):
+            author = _as_str(who.get("login"))
+        out.append({
+            "title": f"{repo} {label}".strip(),
+            "url": html_url,
+            "summary": strip_html(rel.get("body")),
+            "author": author,
+            "published_at": norm_date(rel.get("published_at")),
+            "category": "repo",
+        })
+    return out
+
+
+def adapt_github_releases(src: dict) -> list[dict]:
+    """Walk the `watchlist` of repos, GET each repo's releases. Each repo is
+    wrapped in its own try/except so one 404 / rate-limit can't kill the source.
+    GitHub's API needs a User-Agent — fetch() always sends DEFAULT_UA."""
+    template = src["url"]
+    out: list[dict] = []
+    errors: list[Exception] = []
+    for repo in src.get("watchlist") or []:
+        try:
+            data = fetch_json(template.format(repo=repo), ua=src.get("ua"))
+            out.extend(parse_github_releases(data, repo))
+        except Exception as exc:
+            errors.append(exc)
+            print(f"      · repo skipped: {repo} ({type(exc).__name__})")
+    if errors and not out:
+        raise errors[-1]
+    return out
 
 
 ADAPTERS = {
@@ -274,6 +415,8 @@ ADAPTERS = {
     "hn_algolia": adapt_hn_algolia,
     "ossinsight": adapt_ossinsight,
     "yc_launches": adapt_yc_launches,
+    "hf_models": adapt_hf_models,
+    "github_releases": adapt_github_releases,
 }
 
 
