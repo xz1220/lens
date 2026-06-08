@@ -1,0 +1,341 @@
+# lens source map — 31 sources, the distilled + live-verified output of the
+# daily-intel research. Human-readable version + provenance: docs/SOURCES.md.
+#
+# Field guide
+#   tier     : P0 (machine-first primary) | P1 (expert-owned) | P2 (ranking/fill) | heat (discovery candidates)
+#   method   : rss | atom | json | html
+#   adapter  : collect.py handler that ingests this source. null = NOT yet wired
+#              (the source is real, the ingestion just isn't built — good first tasks).
+#   status   : ok           – verified to return data with a plain GET
+#              needs_parse  – returns 200 but data is in embedded JSON / HTML, needs scraping
+#              needs_headless – page is JS-only, needs a real browser
+#              needs_token  – requires an API token / OAuth
+#              blocked      – currently un-fetchable (OAuth wall / bot block); degraded, not chased
+#   ua       : optional override User-Agent (SEC requires a descriptive one)
+
+meta:
+  verified_on: "2026-06-05"
+  provenance: "life-os: intake/topics/ai-and-ai-agent/research/2026-06-05-workflow.md"
+  total: 31
+  wired_adapters: [generic_feed, hf_daily_papers, hn_algolia, ossinsight, yc_launches]
+
+sources:
+  # ---------- P0: machine-first primary ----------
+  - key: openai-news
+    name: OpenAI News
+    tier: P0
+    category: company
+    url: https://openai.com/news/rss.xml
+    method: rss
+    adapter: generic_feed
+    status: ok
+    notes: 官方 RSS，公司/研究/产品/安全/工程混合，按 category 过滤。OpenAI 收敛到这一个入口。
+
+  - key: anthropic-news
+    name: Anthropic Newsroom
+    tier: P0
+    category: company
+    url: https://www.anthropic.com/news
+    method: html
+    adapter: null
+    status: needs_parse
+    notes: Next.js 页面，列表在 __NEXT_DATA__ 内嵌 JSON；无官方 rss.xml（404）。解析 JSON 而非纯文本 diff。
+
+  - key: anthropic-engineering
+    name: Anthropic Engineering
+    tier: P0
+    category: company
+    url: https://www.anthropic.com/engineering
+    method: html
+    adapter: null
+    status: needs_parse
+    notes: 同 Newsroom，内嵌 JSON，无 RSS。工程向。
+
+  - key: anthropic-research
+    name: Anthropic Research
+    tier: P0
+    category: company
+    url: https://www.anthropic.com/research
+    method: html
+    adapter: null
+    status: needs_parse
+    notes: 同上，研究向。另有 transformer-circuits.pub / alignment.anthropic.com 可选深研究源。
+
+  - key: claude-release-notes
+    name: Claude Release Notes
+    tier: P0
+    category: product
+    url: https://support.claude.com/en/articles/12138966-release-notes
+    method: html
+    adapter: null
+    status: ok
+    notes: 服务端渲染（Zendesk），可直接 HTML 抓；无 RSS。
+
+  - key: gemini-changelog
+    name: Gemini API Changelog
+    tier: P0
+    category: api_change
+    url: https://ai.google.dev/gemini-api/docs/changelog
+    method: html
+    adapter: null
+    status: blocked
+    notes: 纯 GET 被 302 跳 Google OAuth，拿不到。替代：models.list API 看 deprecation。降级不追。
+
+  - key: deepmind-blog
+    name: Google DeepMind Blog
+    tier: P0
+    category: company
+    url: https://deepmind.google/blog/rss.xml
+    method: rss
+    adapter: generic_feed
+    status: ok
+    notes: 官方 RSS（研究中发现，文档原标“页面 diff”）。
+
+  - key: meta-ai-blog
+    name: Meta AI Blog
+    tier: P0
+    category: company
+    url: https://ai.meta.com/blog
+    method: html
+    adapter: null
+    status: blocked
+    notes: /blog /research 全返回 400，拒该类请求。需 headless。降级不追。
+
+  - key: mistral-changelog
+    name: Mistral Changelog
+    tier: P0
+    category: api_change
+    url: https://docs.mistral.ai/resources/changelogs
+    method: html
+    adapter: null
+    status: ok
+    notes: docs changelog 服务端渲染，可抓。
+
+  - key: vercel-changelog
+    name: Vercel Changelog
+    tier: P0
+    category: product
+    url: https://vercel.com/atom
+    method: atom
+    adapter: generic_feed
+    status: ok
+    notes: 官方 Atom（覆盖 changelog）。需过滤非 AI 平台消息。
+
+  - key: perplexity-changelog
+    name: Perplexity Changelog
+    tier: P0
+    category: product
+    url: https://www.perplexity.ai/changelog
+    method: html
+    adapter: null
+    status: blocked
+    notes: 403 + Cloudflare wall。需 headless。降级不追。
+
+  - key: arxiv
+    name: arXiv (cs.CL / cs.LG / cs.AI)
+    tier: P0
+    category: paper
+    url: https://rss.arxiv.org/rss/cs.CL
+    extra_urls:
+      - https://rss.arxiv.org/rss/cs.LG
+      - https://rss.arxiv.org/rss/cs.AI
+    method: rss
+    adapter: generic_feed
+    status: ok
+    notes: 原始日更，噪声高，必须靠评分二次排序。
+
+  - key: hf-daily-papers
+    name: Hugging Face Daily Papers
+    tier: P0
+    category: paper
+    url: https://huggingface.co/api/daily_papers
+    method: json
+    adapter: hf_daily_papers
+    status: ok
+    notes: 页面是 JS，但这个 API 直接给 ~50 条带 upvote/日期。社区排序层。
+
+  - key: sec-edgar-api
+    name: SEC EDGAR API (submissions / full-text)
+    tier: P0
+    category: filing
+    url: https://data.sec.gov/submissions/
+    method: json
+    adapter: null
+    status: ok
+    ua: "lens-intake research <set-your-contact@example.com>"
+    notes: submissions JSON + 全文检索 efts.sec.gov 都通（需合规 UA）。需设计查询。
+
+  - key: sec-latest-filings
+    name: SEC Latest Filings (Atom)
+    tier: P0
+    category: filing
+    url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=&company=&dateb=&owner=include&count=40&output=atom"
+    method: atom
+    adapter: generic_feed
+    status: ok
+    ua: "lens-intake research <set-your-contact@example.com>"
+    notes: 文档曾记 403——其实只要带合规 UA 即通，实测 40 条 entry。Form D 同理。
+
+  # ---------- P1: expert-owned signal ----------
+  - key: simon-willison
+    name: Simon Willison
+    tier: P1
+    category: researcher_note
+    url: https://simonwillison.net/atom/everything/
+    method: atom
+    adapter: generic_feed
+    status: ok
+    notes: LLM/agent/tooling 高信噪比短评，可按 tag 细分。
+
+  - key: karpathy
+    name: Andrej Karpathy
+    tier: P1
+    category: researcher_note
+    url: https://karpathy.ai/
+    method: html
+    adapter: null
+    status: needs_parse
+    notes: Blog 低频，页面需解析；X 作为早期信号（lens 暂不接 X）。
+
+  - key: lilian-weng
+    name: Lilian Weng (Lil'Log)
+    tier: P1
+    category: researcher_note
+    url: https://lilianweng.github.io/index.xml
+    method: rss
+    adapter: generic_feed
+    status: ok
+    notes: 深度综述，低频长价值。
+
+  - key: interconnects
+    name: Nathan Lambert / Interconnects
+    tier: P1
+    category: researcher_note
+    url: https://www.interconnects.ai/feed
+    method: rss
+    adapter: generic_feed
+    status: ok
+    notes: 开源模型 / RLHF / 政策 / 训练洞察。
+
+  - key: latent-space
+    name: swyx / Latent Space
+    tier: P1
+    category: researcher_note
+    url: https://www.latent.space/feed
+    method: rss
+    adapter: generic_feed
+    status: ok
+    notes: AI engineer / agent 生态访谈，需摘要而非全文。
+
+  - key: sebastian-raschka
+    name: Sebastian Raschka / Ahead of AI
+    tier: P1
+    category: researcher_note
+    url: https://magazine.sebastianraschka.com/feed
+    method: rss
+    adapter: generic_feed
+    status: ok
+    notes: LLM 训练/微调/读 paper，适合周读。
+
+  # ---------- P2: ranking / fill ----------
+  - key: alphaxiv
+    name: alphaXiv
+    tier: P2
+    category: paper
+    url: https://www.alphaxiv.org/
+    method: html
+    adapter: null
+    status: needs_parse
+    notes: arXiv 讨论层，验证热度用，不替代 arXiv。
+
+  - key: hf-trending
+    name: HF Trending / Papers with Code
+    tier: P2
+    category: paper
+    url: https://huggingface.co/papers/trending
+    method: json
+    adapter: null
+    status: ok
+    notes: paperswithcode 已重定向到 HF trending；走 HF API 验证代码/benchmark。
+
+  - key: yc-companies
+    name: YC Companies
+    tier: P2
+    category: funding
+    url: https://www.ycombinator.com/companies
+    method: html
+    adapter: null
+    status: needs_headless
+    notes: 页面 100% JS（Algolia 索引，key 未内联），需 headless 或逆向 Algolia。索引而非事件流。
+
+  - key: a16z-portfolio
+    name: a16z Portfolio / News
+    tier: P2
+    category: funding
+    url: https://a16z.com/portfolio/
+    method: html
+    adapter: null
+    status: ok
+    notes: 服务端渲染可抓；只覆盖自家投资，偏营销。
+
+  # ---------- heat: discovery candidates ----------
+  - key: hn-algolia
+    name: Hacker News (Algolia)
+    tier: heat
+    category: other
+    url: "https://hn.algolia.com/api/v1/search_by_date?tags=story&hitsPerPage=50"
+    method: json
+    adapter: hn_algolia
+    status: ok
+    notes: HN 讨论热度，回链到原始 URL/repo/paper。不是事实源。
+
+  - key: hf-models
+    name: Hugging Face Hub API
+    tier: heat
+    category: repo
+    url: "https://huggingface.co/api/models?sort=createdAt&direction=-1&limit=50"
+    method: json
+    adapter: null
+    status: ok
+    notes: 模型/dataset/Space 的创建/下载/likes。paper 仍回 arXiv。
+
+  - key: github-releases
+    name: GitHub Releases (watchlist)
+    tier: heat
+    category: repo
+    url: https://api.github.com/repos/{repo}/releases
+    method: json
+    adapter: null
+    status: ok
+    watchlist: []
+    notes: 只盯已知 repo 的发版；发现新 repo 用 ossinsight。需先填 watchlist。
+
+  - key: ossinsight-trending
+    name: GitHub Trending (OSSInsight)
+    tier: heat
+    category: repo
+    url: "https://api.ossinsight.io/v1/trends/repos/?period=past_week"
+    method: json
+    adapter: ossinsight
+    status: ok
+    notes: 补 GitHub 官方无 trending API 的缺口。period=past_24_hours/past_week/past_month，可按 language。
+
+  - key: product-hunt
+    name: Product Hunt
+    tier: heat
+    category: launch
+    url: https://api.producthunt.com/v2/api/graphql
+    method: json
+    adapter: null
+    status: needs_token
+    notes: GraphQL 需 OAuth token + POST。热度易受 launch 动员影响。
+
+  - key: yc-launches
+    name: YC Launches / Launch HN
+    tier: heat
+    category: launch
+    url: https://www.ycombinator.com/launches
+    method: json
+    adapter: yc_launches
+    status: ok
+    notes: 信号早，偏创业/投融资线索，非每日 AI 技术主线。
