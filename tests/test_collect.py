@@ -472,6 +472,138 @@ class TestParseHfModels(unittest.TestCase):
         self.assertEqual(collect.parse_hf_models(["x", 7]), [])  # non-dict entries skipped
 
 
+class TestSummarizeHfCard(unittest.TestCase):
+    """summarize_hf_card is a PURE function: README text + API metadata -> a
+    faithful one-line summary. Driven off a trimmed real model card, no network.
+    Hard rule under test: every token comes from the README/metadata, never the
+    model id/name."""
+
+    # The /api/models row that accompanies the card (id is NOT fed to the summary).
+    META = {
+        "id": "Muapi/sdxl_sacred_beast",
+        "downloads": 0,
+        "likes": 0,
+        "pipeline_tag": "text-to-image",
+        "library_name": "diffusers",
+        "tags": ["lora", "text-to-image", "stable-diffusion-xl", "sdxl"],
+    }
+
+    def test_summarize_hf_card_from_readme(self):
+        card = (FIXTURES / "hf_model_card.md").read_text(encoding="utf-8")
+        s = collect.summarize_hf_card(card, self.META)
+        # Facts that exist ONLY in the README body / metadata are present:
+        self.assertIn("BJ_Sacred_beast", s)   # **Trained words** (trigger word)
+        self.assertIn("触发词", s)             # ...under a trigger-word label
+        self.assertIn("SDXL", s)              # from **Base model**: SDXL 1.0
+        self.assertIn("基座", s)               # ...under a base-model label
+        self.assertIn("LoRA", s)              # from the `lora` metadata tag
+        self.assertIn("文生图", s)             # text-to-image pipeline_tag, translated
+        self.assertIn("↓0 ♥0", s)             # download/like counts from metadata
+        # NOTHING inferred from the id/name, and no card noise leaked in:
+        self.assertNotIn("神兽", s)            # the H1 echoes the model name -> excluded
+        self.assertNotIn("sdxl_sacred_beast", s)
+        self.assertNotIn("Muapi", s)
+        self.assertNotIn("![", s)             # image markdown
+        self.assertNotIn("preview", s)        # image alt / filename
+        self.assertNotIn("```", s)            # code fence
+        self.assertNotIn("import", s)         # python from the Usage code block
+        self.assertNotIn("muapi.ai", s)       # the Usage instructions / API url
+        self.assertNotIn("---", s)            # frontmatter delimiter stripped
+        self.assertNotIn("license", s)        # frontmatter key not surfaced
+        self.assertLessEqual(len(s), 120)     # length is bounded
+
+    def test_summarize_hf_card_no_readme(self):
+        meta = {"downloads": 7, "likes": 3, "pipeline_tag": "text-generation"}
+        # Empty README -> honest metadata-only fallback (the pre-enrichment form).
+        self.assertEqual(collect.summarize_hf_card("", meta), collect._hf_meta_summary(meta))
+        self.assertEqual(collect.summarize_hf_card("", meta), "[↓7 · ♥3 · text-generation]")
+        # None / non-str README must not raise, still falls back.
+        self.assertEqual(collect.summarize_hf_card(None, meta), "[↓7 · ♥3 · text-generation]")
+        self.assertEqual(collect.summarize_hf_card(123, meta), "[↓7 · ♥3 · text-generation]")
+        # A README that is ONLY frontmatter + an image + a code block has no
+        # extractable prose/fields -> metadata fallback, never fabricated.
+        only_noise = "---\nlicense: mit\n---\n\n![banner](x.png)\n\n```py\nprint(1)\n```\n"
+        self.assertEqual(collect.summarize_hf_card(only_noise, meta), "[↓7 · ♥3 · text-generation]")
+        # Missing meta entirely still degrades to the zero-count metadata form.
+        self.assertEqual(collect.summarize_hf_card("", {}), "[↓0 · ♥0 · —]")
+
+
+class TestAdaptHfModels(unittest.TestCase):
+    """adapt_hf_models fetches the list (fetch_json) then fetches each model's
+    README (fetch) and rebuilds the summary from it. Both are stubbed so the
+    suite stays offline; per-model README errors are isolated."""
+
+    def _patch(self, models, readmes):
+        orig_fj, orig_f = collect.fetch_json, collect.fetch
+        self._list_url = None
+        self._list_ua = None
+        self._readme_urls = []
+        self._readme_uas = []
+
+        def fake_fj(url, ua=None):
+            self._list_url = url
+            self._list_ua = ua
+            return models
+
+        def fake_f(url, ua=None, **kw):
+            self._readme_urls.append(url)
+            self._readme_uas.append(ua)
+            for mid, payload in readmes.items():
+                if url == f"https://huggingface.co/{mid}/raw/main/README.md":
+                    if isinstance(payload, Exception):
+                        raise payload
+                    return payload
+            raise urllib_error_404()
+
+        collect.fetch_json = fake_fj
+        collect.fetch = fake_f
+        self.addCleanup(lambda: setattr(collect, "fetch_json", orig_fj))
+        self.addCleanup(lambda: setattr(collect, "fetch", orig_f))
+
+    def test_enriches_from_readme_and_isolates_per_model_errors(self):
+        models = [
+            {"id": "org/good", "downloads": 3, "likes": 4,
+             "pipeline_tag": "text-generation", "tags": ["llama"],
+             "createdAt": "2026-01-02T00:00:00.000Z"},
+            {"id": "org/boom", "downloads": 0, "likes": 0, "pipeline_tag": "text-to-image"},
+        ]
+        readmes = {
+            "org/good": b"---\nlicense: x\n---\n\nA compact instruction-tuned assistant for coding tasks.\n",
+            "org/boom": urllib_error_404(),  # README fetch blows up for this one
+        }
+        self._patch(models, readmes)
+        recs = collect.adapt_hf_models(
+            {"key": "hf-models", "url": "https://hf/api/models", "ua": "lens"}
+        )
+        # the list was fetched (with ua) and each README was fetched by id (with ua).
+        self.assertEqual(self._list_url, "https://hf/api/models")
+        self.assertEqual(self._list_ua, "lens")
+        self.assertIn("https://huggingface.co/org/good/raw/main/README.md", self._readme_urls)
+        self.assertEqual(self._readme_uas, ["lens", "lens"])
+        # good: summary derived from the README prose + metadata.
+        good = recs[0]
+        self.assertIn("A compact instruction-tuned assistant for coding tasks", good["summary"])
+        self.assertIn("↓3 ♥4", good["summary"])
+        self.assertIn("文本生成", good["summary"])  # text-generation, translated
+        self.assertNotIn("_meta", good)             # carrier dropped before returning
+        self.assertNotIn("[↓", good["summary"])     # not the bracket fallback form
+        # boom: README 404 -> honest metadata-only fallback, NOT a crash.
+        self.assertEqual(recs[1]["summary"], "[↓0 · ♥0 · text-to-image]")
+        self.assertNotIn("_meta", recs[1])
+
+    def test_readme_limit_caps_fetches(self):
+        models = [{"id": f"o/m{i}", "downloads": i, "likes": 0} for i in range(5)]
+        self._patch(models, {})  # every README 404s -> all fall back to metadata
+        recs = collect.adapt_hf_models(
+            {"key": "hf-models", "url": "https://hf/api/models", "readme_limit": 2}
+        )
+        self.assertEqual(len(self._readme_urls), 2)  # only the first 2 READMEs fetched
+        self.assertEqual(len(recs), 5)               # all records still returned
+        for r in recs:
+            self.assertNotIn("_meta", r)             # carrier always dropped
+            self.assertTrue(r["summary"].startswith("[↓"))  # honest metadata fallback
+
+
 class TestParseGithubReleases(unittest.TestCase):
     def test_basic(self):
         recs = collect.parse_github_releases(fx_json("github_releases.json"), "owner/repo")

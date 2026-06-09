@@ -418,8 +418,200 @@ def adapt_yc_launches(src: dict) -> list[dict]:
     return parse_yc_launches(fetch_json(src["url"], ua=src.get("ua")))
 
 
+# --------------------------------------------------------------------------- #
+# Hugging Face Hub models — list metadata + a FAITHFUL per-model README summary.
+#
+# The list endpoint (/api/models) hands us id/downloads/likes/pipeline_tag/tags
+# but no description, so the bare summary ("[↓.. ♥.. tag]") never says what a
+# model actually DOES. We fetch one more thing per model — its model-card README
+# — and distil a summary from its REAL text. Hard rule: every token of the
+# summary comes from the fetched README or the API metadata; NOTHING is ever
+# inferred from the model id/name. No README (404 / empty / prose-less / fetch
+# error) -> honest metadata-only fallback. parse_* stays a pure list parse; the
+# README fetch lives in adapt_*, and summarize_hf_card is a pure (testable) fn.
+# --------------------------------------------------------------------------- #
+HF_README_URL = "https://huggingface.co/{id}/raw/main/README.md"
+
+# pipeline_tag -> short zh label: a faithful TRANSLATION of a metadata value,
+# not a guess from the name. An unmapped tag falls through verbatim.
+_HF_PIPELINE_LABELS = {
+    "text-to-image": "文生图",
+    "image-to-image": "图生图",
+    "text-to-video": "文生视频",
+    "image-to-video": "图生视频",
+    "text-generation": "文本生成",
+    "text2text-generation": "文本生成",
+    "image-text-to-text": "多模态",
+    "visual-question-answering": "视觉问答",
+    "image-classification": "图像分类",
+    "object-detection": "目标检测",
+    "automatic-speech-recognition": "语音识别",
+    "text-to-speech": "语音合成",
+    "text-to-audio": "音频生成",
+    "feature-extraction": "特征提取",
+    "sentence-similarity": "句向量",
+    "fill-mask": "掩码填充",
+    "question-answering": "问答",
+    "translation": "翻译",
+    "summarization": "摘要",
+    "token-classification": "序列标注",
+    "text-classification": "文本分类",
+}
+
+# tag -> marker, shown verbatim (LoRA / quant format / GGUF ...). Each appears
+# ONLY when that exact tag is present in the API / frontmatter metadata.
+_HF_TAG_MARKERS = (
+    ("lora", "LoRA"), ("qlora", "QLoRA"), ("gguf", "GGUF"), ("awq", "AWQ"),
+    ("gptq", "GPTQ"), ("4-bit", "4bit"), ("4bit", "4bit"),
+    ("8-bit", "8bit"), ("8bit", "8bit"),
+)
+
+
+def _hf_meta_summary(meta: dict) -> str:
+    """Honest metadata-only summary — the fallback when there's no README prose.
+    Byte-identical to the pre-enrichment format so parse_hf_models stays stable."""
+    if not isinstance(meta, dict):
+        meta = {}
+    downloads = meta.get("downloads")
+    likes = meta.get("likes")
+    kind = meta.get("pipeline_tag") or meta.get("library_name") or "—"
+    return f"[↓{downloads if downloads is not None else 0} · ♥{likes if likes is not None else 0} · {kind}]"
+
+
+def _hf_frontmatter(text: str):
+    """Split a model card into (frontmatter dict, body). The leading `--- ... ---`
+    YAML block is part of the fetched README, so we parse it (with PyYAML, an
+    existing dep) to supplement the API metadata; malformed -> ({}, body)."""
+    m = re.match(r"(?s)^﻿?[ \t]*---[ \t]*\r?\n(.*?)\r?\n---[ \t]*\r?\n?", text or "")
+    if not m:
+        return {}, (text or "")
+    try:
+        data = yaml.safe_load(m.group(1))
+    except Exception:
+        data = None
+    return (data if isinstance(data, dict) else {}), text[m.end():]
+
+
+def _hf_clean_inline(text: str) -> str:
+    """Strip markdown noise from one inline span: images dropped, links reduced
+    to their text, emphasis/backticks removed, then strip_html collapses HTML +
+    whitespace. Keeps only the human-readable words."""
+    text = str(text or "")
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", text)        # ![alt](src)  -> gone
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)     # [text](url)  -> text
+    text = text.replace("`", "")
+    # Strip emphasis markers but NOT single underscores — those are part of
+    # snake_case identifiers (e.g. trigger word BJ_Sacred_beast).
+    text = re.sub(r"\*\*|__|[*~]", "", text)
+    return strip_html(text, limit=300).strip(" :：-—|")
+
+
+def _hf_field(body: str, label_re: str) -> str:
+    """Faithfully pull a `**Label**: value` model-card field (Base model /
+    Trained words). '' when the field isn't present in the body."""
+    m = re.search(
+        rf"(?im)^[ \t]*\*\*[ \t]*(?:{label_re})[ \t]*[:：]?[ \t]*\*\*[ \t]*[:：]?[ \t]*(.+?)[ \t]*$",
+        body or "",
+    )
+    return _hf_clean_inline(m.group(1)) if m else ""
+
+
+def _hf_first_prose(body: str) -> str:
+    """First genuine description paragraph from the card body. The description is
+    the lede — the text ABOVE the first `## Section` heading (Usage / Install /
+    License sections are not descriptions). Code fences, images, headings,
+    tables, lists, bare links and `**Field**:` lines are skipped. '' if none."""
+    body = re.sub(r"(?s)<!--.*?-->", " ", body or "")
+    body = re.sub(r"(?s)```.*?```|~~~.*?~~~", " ", body)     # drop fenced code whole
+    cut = re.search(r"(?im)^[ \t]{0,3}#{2,}[ \t]+\S", body)  # first '## ...' heading
+    if cut:
+        body = body[:cut.start()]
+    for raw in re.split(r"\r?\n[ \t]*\r?\n", body):
+        block = raw.strip()
+        if not block:
+            continue
+        head = block.splitlines()[0].lstrip()
+        if head.startswith(("#", ">", "|", "```", "~~~")):   # heading/quote/table/code
+            continue
+        if re.match(r"^([-*+]|\d+\.)[ \t]+\S", head):        # list item
+            continue
+        if re.match(r"(?i)^\*\*[^*\n]+\*\*[ \t]*[:：]", block):  # **Field**: value line
+            continue
+        text = _hf_clean_inline(block.replace("\n", " "))
+        if len(text) < 12 or re.match(r"(?is)^https?://\S+$", text):
+            continue                                         # too short / bare link
+        return text[:160]
+    return ""
+
+
+def summarize_hf_card(readme_text: str, meta: dict) -> str:
+    """Build a FAITHFUL one-line summary of a HF model from its fetched README +
+    API metadata. Every token comes from the README/metadata — NEVER inferred
+    from the model id/name. Empty / prose-less README -> metadata-only fallback.
+    Pure function: no network, fixture-testable.
+    """
+    meta = meta if isinstance(meta, dict) else {}
+    fm, body = _hf_frontmatter(_html_text(readme_text))
+
+    def mget(key):
+        v = meta.get(key)
+        return v if v not in (None, "", [], {}) else fm.get(key)
+
+    # README-body facts — these are what make the summary specific & honest.
+    base = _hf_field(body, r"base\s*model")
+    trigger = _hf_field(body, r"train(?:ed)?\s*words?|trigger\s*words?")
+    prose = _hf_first_prose(body)
+    # base model may instead live in the metadata / frontmatter.
+    if not base:
+        bm = mget("base_model")
+        if isinstance(bm, (list, tuple)) and bm:
+            bm = bm[0]
+        base = _hf_clean_inline(bm) if isinstance(bm, str) else ""
+
+    # No extractable README content at all -> honest metadata-only summary.
+    if not (base or trigger or prose):
+        return _hf_meta_summary(meta)
+
+    # Kind label: the (translated) pipeline_tag + any LoRA/quant tag markers.
+    tags = mget("tags")
+    tags_l = [str(t).lower() for t in tags] if isinstance(tags, (list, tuple)) else []
+    pipeline = _as_str(mget("pipeline_tag"))
+    parts = []
+    if pipeline:
+        parts.append(_HF_PIPELINE_LABELS.get(pipeline, pipeline))
+    for tag, marker in _HF_TAG_MARKERS:
+        if tag in tags_l and marker not in parts:
+            parts.append(marker)
+    kind = " ".join(parts).strip() or _as_str(mget("library_name"))
+
+    segs = []
+    if kind:
+        segs.append(kind)
+    if base:
+        segs.append(f"基座 {base}")
+    if trigger:
+        segs.append(f"触发词 {trigger}")
+    if prose:
+        segs.append(prose)
+    head = " · ".join(segs)
+    if len(head) > 110:                                       # keep it bounded
+        head = head[:109].rstrip(" ·") + "…"
+
+    downloads = meta.get("downloads")
+    likes = meta.get("likes")
+    counts = f"↓{downloads if downloads is not None else 0} ♥{likes if likes is not None else 0}"
+    return f"{head} · {counts}"
+
+
 def parse_hf_models(data) -> list[dict]:
-    """HF Hub /api/models -> repo records. Skips entries with no model id."""
+    """HF Hub /api/models -> repo records. Skips entries with no model id.
+
+    Pure list parse (no network): the summary here is metadata-only. README
+    enrichment happens in adapt_hf_models, which overwrites `summary` per model
+    via summarize_hf_card. Each record carries the raw model dict under `_meta`
+    so the adapt layer can summarize without re-deriving it; adapt pops `_meta`
+    before returning and save() ignores unknown keys regardless.
+    """
     out = []
     for m in data if isinstance(data, list) else []:
         if not isinstance(m, dict):
@@ -427,22 +619,40 @@ def parse_hf_models(data) -> list[dict]:
         mid = _as_str(m.get("id") or m.get("modelId"))  # tolerate non-str ids
         if not mid:
             continue
-        downloads = m.get("downloads")
-        likes = m.get("likes")
-        kind = m.get("pipeline_tag") or m.get("library_name") or "—"
         out.append({
             "title": mid,
             "url": f"https://huggingface.co/{mid}",
-            "summary": f"[↓{downloads if downloads is not None else 0} · ♥{likes if likes is not None else 0} · {kind}]",
+            "summary": _hf_meta_summary(m),
             "author": mid.split("/")[0] if "/" in mid else mid,
             "published_at": norm_date(m.get("createdAt")),
             "category": "repo",
+            "_meta": m,
         })
     return out
 
 
 def adapt_hf_models(src: dict) -> list[dict]:
-    return parse_hf_models(fetch_json(src["url"], ua=src.get("ua")))
+    """Fetch the model list, then enrich each record with a README-derived
+    summary. Each per-model README fetch is isolated in its own try/except: a
+    404 / timeout / empty body leaves that record on its honest metadata
+    summary, never raises, never blocks the other models. README fetches are
+    capped at `readme_limit` (default 50, == the list cap) to bound cost; the
+    `_meta` carrier is dropped before returning so records match the schema.
+    """
+    records = parse_hf_models(fetch_json(src["url"], ua=src.get("ua")))
+    budget = src.get("readme_limit", 50)
+    for rec in records:
+        meta = rec.pop("_meta", {}) or {}
+        if budget <= 0:
+            continue                                         # keep metadata summary
+        budget -= 1
+        try:
+            readme = fetch(HF_README_URL.format(id=rec["title"]),
+                           ua=src.get("ua")).decode("utf-8", "replace")
+        except Exception:
+            readme = ""                                      # -> metadata fallback
+        rec["summary"] = summarize_hf_card(readme, meta)
+    return records
 
 
 def parse_github_releases(releases, repo: str) -> list[dict]:
