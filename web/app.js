@@ -409,7 +409,12 @@ function renderDetail() {
     ? el('div', { class: 'summary', text: it.summary })
     : el('div', { class: 'summary faint', text: '（这条没有摘要，打开原文看全文。）' });
 
-  detailEl.append(head, title, summary, triageBlock(), el('hr', { class: 'rule' }),
+  // 来源说明：选中一条时，右侧详情里常驻显示该源是什么（不止 hover）
+  const srcDescLine = srcDesc
+    ? el('div', { class: 'src-desc-line', text: '来源 · ' + srcDesc })
+    : null;
+  detailEl.append(head, ...(srcDescLine ? [srcDescLine] : []), title, summary,
+    triageBlock(), el('hr', { class: 'rule' }),
     discussionBlock(), el('hr', { class: 'rule' }), ideaBlock());
 
   // 节点挂载到 detailEl 后再填充动态子视图：标签 chip / 讨论文件 chip /
