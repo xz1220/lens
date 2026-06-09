@@ -316,15 +316,15 @@ sources:
     notes: HN 讨论热度，回链到原始 URL/repo/paper。不是事实源。
 
   - key: hf-models
-    name: Hugging Face Hub API
-    desc: "HF Hub 新模型仓库流（仅 /api/models 模型仓库，不含数据集/Space），按创建时间看下载与点赞；日更噪声大，论文回arXiv。"
+    name: Hugging Face 热门模型
+    desc: "HF Hub 热门模型流（/api/models 按 trending 排序），多为当红、写了模型卡的模型；adapter 从模型卡 README 提取类型/基座/触发词，下载赞看热度。"
     tier: heat
     category: repo
-    url: "https://huggingface.co/api/models?sort=createdAt&direction=-1&limit=50"
+    url: "https://huggingface.co/api/models?sort=trendingScore&direction=-1&limit=50"
     method: json
     adapter: hf_models
     status: ok
-    notes: 模型/dataset/Space 的创建/下载/likes。paper 仍回 arXiv。
+    notes: 按 trendingScore 取当红模型（基本都写了卡）；adapter 会拉 /raw/main/README.md 出忠实描述。曾用 sort=createdAt 但多为无卡裸上传，噪声大。
 
   - key: github-releases
     name: GitHub Releases (watchlist)
