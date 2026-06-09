@@ -405,15 +405,18 @@ function renderDetail() {
 
   const title = el('h1', { class: 'detail-title', text: it.title || '(无标题)' });
 
+  // 标题之下就是这一条的「描述」（清晰、不缩小）
+  const descLabel = el('div', { class: 'detail-label', text: '描述' });
   const summary = it.summary
     ? el('div', { class: 'summary', text: it.summary })
     : el('div', { class: 'summary faint', text: '（这条没有摘要，打开原文看全文。）' });
 
-  // 来源说明：选中一条时，右侧详情里常驻显示该源是什么（不止 hover）
+  // 来源说明降级为「描述」之后的小注：它讲的是这个源，不是这一条
   const srcDescLine = srcDesc
     ? el('div', { class: 'src-desc-line', text: '来源 · ' + srcDesc })
     : null;
-  detailEl.append(head, ...(srcDescLine ? [srcDescLine] : []), title, summary,
+  detailEl.append(head, title, descLabel, summary,
+    ...(srcDescLine ? [srcDescLine] : []),
     triageBlock(), el('hr', { class: 'rule' }),
     discussionBlock(), el('hr', { class: 'rule' }), ideaBlock());
 

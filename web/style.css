@@ -120,7 +120,9 @@ a{ color:inherit; }
 .source-desc[hidden]{ display:none; }
 /* 详情里常驻显示的来源说明（选中一条时） */
 .src-desc-line{ font-size:11.5px; line-height:1.6; color:var(--ink-3);
-  padding-left:10px; border-left:2px solid var(--strong); margin:2px 0 0; }
+  padding-left:10px; border-left:2px solid var(--strong); margin:0 0 22px; }
+/* 详情区块小标签（描述 等），与右侧 triage 字段标签同风格 */
+.detail-label{ font-size:11px; font-weight:500; color:var(--ink-3); letter-spacing:.08em; margin:0 0 7px; }
 
 /* ---------------- middle list ---------------- */
 .list{
@@ -204,7 +206,7 @@ a{ color:inherit; }
 .detail-title{ font-family:var(--serif); font-weight:500; font-size:26px; line-height:1.4;
   margin:0 0 16px; color:var(--ink); letter-spacing:.02em; overflow-wrap:anywhere; word-break:break-word; }
 .summary{ background:var(--sunken); border-radius:var(--r-lg); padding:14px 16px;
-  color:var(--ink-2); font-size:13.5px; line-height:1.75; margin-bottom:24px; }
+  color:var(--ink-2); font-size:14.5px; line-height:1.75; margin-bottom:0; }
 .summary.faint{ color:var(--ink-3); font-style:italic; }
 
 .block{ display:flex; flex-direction:column; gap:14px; }
