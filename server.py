@@ -40,6 +40,14 @@ VALID_STATUS = {"captured", "reviewed", "promoted", "ignored"}
 CONTENT_TYPES = {".html": "text/html", ".js": "text/javascript", ".css": "text/css",
                  ".json": "application/json", ".svg": "image/svg+xml", ".ico": "image/x-icon"}
 
+# 内联光圈 favicon（与 web/index.html 的 <link rel=icon> 同图），墨色冷调雾青
+FAVICON_SVG = (
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
+    "<rect width='32' height='32' rx='7' fill='#F4F2EC'/>"
+    "<circle cx='16' cy='16' r='10' fill='none' stroke='#58625D' stroke-width='1.8'/>"
+    "<circle cx='16' cy='16' r='3.2' fill='#58625D'/></svg>"
+).encode("utf-8")
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -112,6 +120,9 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path, qs = parsed.path, urllib.parse.parse_qs(parsed.query)
         try:
+            if path == "/favicon.ico":
+                # 内联光圈图标，避免浏览器自动请求 /favicon.ico 落到 404（控制台报错）
+                return self._send(200, FAVICON_SVG, "image/svg+xml")
             if path == "/api/stats":
                 return self._json(self.api_stats())
             if path == "/api/sources":

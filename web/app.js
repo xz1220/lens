@@ -330,9 +330,11 @@ function rowEl(it, i) {
     onclick: () => selectItem(it, i),
   });
 
+  // 列表来源名也带 hover 说明（与详情一致）：有 desc 则虚线下划线 + title 悬浮
+  const srcDesc = (sourcesMap[it.source_key] || {}).desc || '';
   const top = el('div', { class: 'row-top' },
     tierBadge(it.tier),
-    el('span', { class: 'src', text: it.source_name || it.source_key || '' }),
+    el('span', { class: 'src' + (srcDesc ? ' has-desc' : ''), title: srcDesc || null, text: it.source_name || it.source_key || '' }),
     el('span', { class: 'row-date num', text: dDate(it.published_at) || '—' }),
   );
 
@@ -440,7 +442,7 @@ function emptyState() {
   wrap.append(
     el('div', { class: 'empty-title', text: '选一条信息开始' }),
     el('div', { class: 'empty-hint', text: '左侧筛选，中间挑一条，在这里评判、和 AI 发散讨论、沉淀灵感。' }),
-    el('div', { class: 'empty-latin', text: 'a reading & review desk' }),
+    el('div', { class: 'empty-latin', text: '一处读 · 评 · 议 · 思的工作台' }),
   );
   return wrap;
 }
@@ -453,9 +455,9 @@ function triageBlock() {
   const seg = el('div', { class: 'seg', id: 'seg' });
   for (let n = 0; n <= 5; n++) {
     seg.append(el('button', {
-      class: 'seg-box' + ((draft.score ?? 0) === n ? ' on' : ''),
+      class: 'seg-box' + (draft.score === n ? ' on' : ''),
       'data-n': n, type: 'button',
-      onclick: () => setScore(n === 0 ? null : n),
+      onclick: () => setScore(n),
     }, String(n)));
   }
   seg.append(el('span', { class: 'seg-val num', id: 'seg-val', text: `${draft.score ?? '—'} / 5` }));
@@ -510,9 +512,9 @@ function setScore(n) {
   draft.score = n;
   const seg = $('#seg');
   if (!seg) return;
-  // null（清空）映射到 0 号方块，使「未评」也有明确的选中态
+  // 0 是真实评分（落库为 0）；null = 未评，此时不点亮任何方块
   seg.querySelectorAll('.seg-box').forEach((b) =>
-    b.classList.toggle('on', Number(b.dataset.n) === (n ?? 0)));
+    b.classList.toggle('on', Number(b.dataset.n) === n));
   $('#seg-val').textContent = `${n ?? '—'} / 5`;
 }
 
@@ -763,7 +765,7 @@ document.addEventListener('keydown', (e) => {
     case 'g': case 'G': if (current) genDiscussion(); break;
     case 'o': case 'O': if (current && current.url) window.open(current.url, '_blank', 'noopener'); break;
     case 'i': case 'I': if (current) { e.preventDefault(); $('#idea-body')?.focus(); } break;
-    case '0': if (current) setScore(null); break;
+    case '0': if (current) setScore(0); break;
     case '1': case '2': case '3': case '4': case '5':
       if (current) setScore(Number(e.key)); break;
     default: break;
