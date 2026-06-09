@@ -23,6 +23,7 @@ sources:
   # ---------- P0: machine-first primary ----------
   - key: openai-news
     name: OpenAI News
+    desc: "OpenAI官方RSS，一线看产品、研究、公司/安全动态；更新频繁且偏公关，按分类读，API变化再核文档。"
     tier: P0
     category: company
     url: https://openai.com/news/rss.xml
@@ -33,6 +34,7 @@ sources:
 
   - key: anthropic-news
     name: Anthropic Newsroom
+    desc: "Anthropic 官方新闻室，发公司、产品与安全公告；更新不频繁、噪声低，按日期扫标题，注意是官方口径。"
     tier: P0
     category: company
     url: https://www.anthropic.com/news
@@ -43,6 +45,7 @@ sources:
 
   - key: anthropic-engineering
     name: Anthropic Engineering
+    desc: "Anthropic官方工程博客，低频高信号，讲模型基础设施与安全实践；适合精读取舍，别当发布流。"
     tier: P0
     category: company
     url: https://www.anthropic.com/engineering
@@ -53,6 +56,7 @@ sources:
 
   - key: anthropic-research
     name: Anthropic Research
+    desc: "Anthropic研究博客，发安全/对齐/评测长文；更新慢但信号强，读方法和局限，别当产品路线图。"
     tier: P0
     category: company
     url: https://www.anthropic.com/research
@@ -63,6 +67,7 @@ sources:
 
   - key: claude-release-notes
     name: Claude Release Notes
+    desc: "Claude 官方更新页，抓产品功能、模型切换和合规信号；约周更、噪声低，按日期看并留意回补。"
     tier: P0
     category: product
     url: https://support.claude.com/en/articles/12138966-release-notes
@@ -73,6 +78,7 @@ sources:
 
   - key: gemini-changelog
     name: Gemini API Changelog
+    desc: "Gemini API官方更新页，报模型/API上线、弃用和破坏性变更；不定期低噪，先看停用日期和迁移提示。"
     tier: P0
     category: api_change
     url: https://ai.google.dev/gemini-api/docs/changelog
@@ -83,6 +89,7 @@ sources:
 
   - key: deepmind-blog
     name: Google DeepMind Blog
+    desc: "DeepMind官方博客，发Gemini等模型、科研突破和产品动向；更新不均且偏PR，先扫标题挑重磅。"
     tier: P0
     category: company
     url: https://deepmind.google/blog/rss.xml
@@ -93,6 +100,7 @@ sources:
 
   - key: meta-ai-blog
     name: Meta AI Blog
+    desc: "Meta AI 官方博客，发布 Llama/FAIR 研究与产品信号；更新不定、偏公关，读结论也要追论文/代码。"
     tier: P0
     category: company
     url: https://ai.meta.com/blog
@@ -103,6 +111,7 @@ sources:
 
   - key: mistral-changelog
     name: Mistral Changelog
+    desc: "Mistral官方更新日志，记录模型、API与SDK变更；不定期、低噪，优先看日期、破坏和弃用项。"
     tier: P0
     category: api_change
     url: https://docs.mistral.ai/resources/changelogs
@@ -113,6 +122,7 @@ sources:
 
   - key: vercel-changelog
     name: Vercel Changelog
+    desc: "Vercel官方Atom，混合博客和变更；看AI网关/SDK、部署平台动向，更新勤且非AI多，按产品名筛读。"
     tier: P0
     category: product
     url: https://vercel.com/atom
@@ -123,6 +133,7 @@ sources:
 
   - key: perplexity-changelog
     name: Perplexity Changelog
+    desc: "Perplexity官方更新日志，跟踪功能、模型与应用发布；低频低噪，网页有Cloudflare，适合看原文确认。"
     tier: P0
     category: product
     url: https://www.perplexity.ai/changelog
@@ -133,6 +144,7 @@ sources:
 
   - key: arxiv
     name: arXiv (cs.CL / cs.LG / cs.AI)
+    desc: "arXiv 提供 CL/LG/AI 新论文早期信号，日更但噪声高；先筛相关度，摘要别当定论。"
     tier: P0
     category: paper
     url: https://rss.arxiv.org/rss/cs.CL
@@ -146,6 +158,7 @@ sources:
 
   - key: hf-daily-papers
     name: Hugging Face Daily Papers
+    desc: "HF每日AI论文榜，看社区投票热度；日更约50篇，噪声较低但偏热门，先看摘要别只看票数。"
     tier: P0
     category: paper
     url: https://huggingface.co/api/daily_papers
@@ -156,6 +169,7 @@ sources:
 
   - key: sec-edgar-api
     name: SEC EDGAR Full-Text Search (AI filings)
+    desc: "SEC申报全文搜AI提及，抓8-K/S-1/424B；随披露更新，噪声较低但常有套话，先看表格类型和上下文。"
     tier: P0
     category: filing
     url: "https://efts.sec.gov/LATEST/search-index?q=%22artificial%20intelligence%22&forms=8-K%2CS-1%2C424B"
@@ -167,6 +181,7 @@ sources:
 
   - key: sec-latest-filings
     name: SEC Latest Filings (Atom)
+    desc: "SEC最新披露Atom：实时滚动全部公司申报，噪声高；先看表格类型与公司，AI相关需再筛。"
     tier: P0
     category: filing
     url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=&company=&dateb=&owner=include&count=40&output=atom"
@@ -179,6 +194,7 @@ sources:
   # ---------- P1: expert-owned signal ----------
   - key: simon-willison
     name: Simon Willison
+    desc: "Simon Willison博客，追踪LLM、agent与工具短评；更新勤、噪声低，按标题和标签扫读。"
     tier: P1
     category: researcher_note
     url: https://simonwillison.net/atom/everything/
@@ -189,6 +205,7 @@ sources:
 
   - key: karpathy
     name: Andrej Karpathy
+    desc: "Karpathy个人博客，AI/LLM深度思考；低频长文、噪声低，精读，不当快讯源。"
     tier: P1
     category: researcher_note
     url: https://karpathy.bearblog.dev/feed/
@@ -199,6 +216,7 @@ sources:
 
   - key: lilian-weng
     name: Lilian Weng (Lil'Log)
+    desc: "Lil'Log 是 Lilian Weng 的AI研究长文。低频低噪，多为论文综述，适合精读作背景，不当快讯。"
     tier: P1
     category: researcher_note
     url: https://lilianweng.github.io/index.xml
@@ -209,6 +227,7 @@ sources:
 
   - key: interconnects
     name: Nathan Lambert / Interconnects
+    desc: "Lambert 的 AI 评论源，跟开源模型/RLHF/政策；周更左右、高信噪，先读摘要再深读。"
     tier: P1
     category: researcher_note
     url: https://www.interconnects.ai/feed
@@ -219,6 +238,7 @@ sources:
 
   - key: latent-space
     name: swyx / Latent Space
+    desc: "AI工程师通讯/播客，抓Agent、模型和基础设施信号；更新频繁低噪但很长，先读摘要。"
     tier: P1
     category: researcher_note
     url: https://www.latent.space/feed
@@ -229,6 +249,7 @@ sources:
 
   - key: sebastian-raschka
     name: Sebastian Raschka / Ahead of AI
+    desc: "Raschka 的 AI 研究札记，讲 LLM 训练、微调与论文。周更左右、低噪但篇幅长，适合周末精读。"
     tier: P1
     category: researcher_note
     url: https://magazine.sebastianraschka.com/feed
@@ -240,6 +261,7 @@ sources:
   # ---------- P2: ranking / fill ----------
   - key: alphaxiv
     name: alphaXiv
+    desc: "alphaXiv 是 arXiv 论文的社区讨论层，显示新论文与热度信号；更新滚动、噪声偏高，用它验证关注度，原文仍看 arXiv。"
     tier: P2
     category: paper
     url: https://www.alphaxiv.org/
@@ -250,6 +272,7 @@ sources:
 
   - key: hf-trending
     name: HF Trending Papers
+    desc: "HF论文趋势榜，看社区热投的AI论文；日更偏热点，适合找苗头，别当质量背书。"
     tier: P2
     category: paper
     url: https://huggingface.co/api/daily_papers?sort=trending
@@ -260,6 +283,7 @@ sources:
 
   - key: yc-companies
     name: YC Companies
+    desc: "YC创业公司目录，能看批次、赛道和融资线索；更新随入库，非事件流，适合按行业筛读。"
     tier: P2
     category: funding
     url: https://www.ycombinator.com/companies
@@ -270,6 +294,7 @@ sources:
 
   - key: a16z-portfolio
     name: a16z Portfolio / News
+    desc: "a16z投资组合公司卡片（仅 portfolio 公司，无新闻），看其押注赛道和新增公司；更新不密、偏自宣，只作基金视角线索。"
     tier: P2
     category: funding
     url: https://a16z.com/portfolio/
@@ -281,6 +306,7 @@ sources:
   # ---------- heat: discovery candidates ----------
   - key: hn-algolia
     name: Hacker News (Algolia)
+    desc: "HN 最新帖子流，给技术/创业热度与讨论信号；更新快噪声高，看分数/评论后顺原链核实。"
     tier: heat
     category: other
     url: "https://hn.algolia.com/api/v1/search_by_date?tags=story&hitsPerPage=50"
@@ -291,6 +317,7 @@ sources:
 
   - key: hf-models
     name: Hugging Face Hub API
+    desc: "HF Hub 新模型仓库流（仅 /api/models 模型仓库，不含数据集/Space），按创建时间看下载与点赞；日更噪声大，论文回arXiv。"
     tier: heat
     category: repo
     url: "https://huggingface.co/api/models?sort=createdAt&direction=-1&limit=50"
@@ -301,6 +328,7 @@ sources:
 
   - key: github-releases
     name: GitHub Releases (watchlist)
+    desc: "盯AI重点仓库的GitHub发版，抓SDK/框架更新；不定期但噪声低，只看标题、版本号和破坏性说明。"
     tier: heat
     category: repo
     url: https://api.github.com/repos/{repo}/releases
@@ -318,6 +346,7 @@ sources:
 
   - key: ossinsight-trending
     name: GitHub Trending (OSSInsight)
+    desc: "OSSInsight的GitHub周趋势榜，看星标/PR/push热度；滚动更新噪声高，找新repo用，别当质量背书。"
     tier: heat
     category: repo
     url: "https://api.ossinsight.io/v1/trends/repos/?period=past_week"
@@ -328,6 +357,7 @@ sources:
 
   - key: product-hunt
     name: Product Hunt
+    desc: "Product Hunt每日新产品榜，看发布热度和早期反馈；拉票噪声高，重看评论与团队。"
     tier: heat
     category: launch
     url: https://api.producthunt.com/v2/api/graphql
@@ -338,6 +368,7 @@ sources:
 
   - key: yc-launches
     name: YC Launches / Launch HN
+    desc: "YC/Launch HN 创业发布流，早看新品和融资线索；更新不定、营销味重，重点看用户反馈。"
     tier: heat
     category: launch
     url: https://www.ycombinator.com/launches

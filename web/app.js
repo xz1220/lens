@@ -73,6 +73,7 @@ const ICON = {
 // ---------------- 状态 ----------------
 const filters = { status: '', tier: '', source: '', min_score: '', q: '', sort: 'date' };
 let statsCache = { total: 0, by_status: {}, by_tier: {}, last_collect: null };
+let sourcesMap = {};      // source_key -> {name, desc, tier, ...}，用于来源说明
 let itemsCache = [];
 let current = null;       // 当前选中的（已保存的）item 行
 let selectedIndex = -1;
@@ -157,11 +158,12 @@ function buildRail() {
     'tier',
   )));
 
-  // 来源
+  // 来源（选中某个源时，下方小字显示该源的说明）
   const sel = el('select', { class: 'select', id: 'sourcesel' },
     el('option', { value: '' }, '全部来源'));
-  sel.addEventListener('change', () => { filters.source = sel.value; loadItems(); });
-  railEl.append(fgroup('来源', sel));
+  const srcDesc = el('div', { class: 'source-desc', id: 'source-desc', hidden: true });
+  sel.addEventListener('change', () => { filters.source = sel.value; updateSourceDesc(); loadItems(); });
+  railEl.append(fgroup('来源', el('div', { class: 'source-wrap' }, sel, srcDesc)));
 
   // 最低分
   railEl.append(fgroup('最低分', chipRow(
@@ -224,12 +226,30 @@ function updateRailCounts() {
 
 async function loadSources() {
   const srcs = await api('/api/sources');
+  sourcesMap = {};
+  for (const s of srcs) sourcesMap[s.key] = s;
   const sel = $('#sourcesel');
   if (!sel) return;
   for (const s of srcs) {
     const t = TIER[s.tier];
     const tag = t ? t.label : (s.tier || '');
-    sel.append(el('option', { value: s.key }, `${tag ? tag + ' · ' : ''}${s.name || s.key}`));
+    // option 自带 title 悬浮，鼠标停在下拉项上也能看说明
+    sel.append(el('option', { value: s.key, title: s.desc || '' }, `${tag ? tag + ' · ' : ''}${s.name || s.key}`));
+  }
+  updateSourceDesc();
+}
+
+// 来源筛选选中某个源时，在下拉框下方显示该源的说明（小字、muted）
+function updateSourceDesc() {
+  const box = $('#source-desc');
+  if (!box) return;
+  const s = sourcesMap[filters.source];
+  if (filters.source && s && s.desc) {
+    box.textContent = s.desc;
+    box.hidden = false;
+  } else {
+    box.textContent = '';
+    box.hidden = true;
   }
 }
 
@@ -372,10 +392,12 @@ function renderDetail() {
   const it = current;
 
   // —— 详情头 ——
+  const srcDesc = (sourcesMap[it.source_key] || {}).desc || '';
   const head = el('div', { class: 'detail-head' },
     el('div', { class: 'dh-meta' },
       tierBadge(it.tier),
-      el('span', { class: 'src', text: it.source_name || it.source_key || '' }),
+      // 来源名旁的说明：有则虚线下划线 + hover 悬浮（title）
+      el('span', { class: 'src' + (srcDesc ? ' has-desc' : ''), title: srcDesc || null, text: it.source_name || it.source_key || '' }),
       el('span', { class: 'dh-date num', text: dDate(it.published_at) || '—' }),
     ),
     el('a', { class: 'open-link', href: it.url || '#', target: '_blank', rel: 'noopener' }, '打开原文 ↗'),

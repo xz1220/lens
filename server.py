@@ -152,7 +152,7 @@ class Handler(BaseHTTPRequestHandler):
     def api_sources(self) -> list:
         doc = yaml.safe_load(SOURCES_PATH.read_text())
         return [
-            {k: s.get(k) for k in ("key", "name", "tier", "category", "status", "adapter")}
+            {k: s.get(k) for k in ("key", "name", "tier", "category", "status", "adapter", "desc")}
             for s in doc.get("sources", [])
         ]
 
