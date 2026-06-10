@@ -1,0 +1,298 @@
+{
+  "_comment": "lens demo 种子数据：server.py --demo 用它在 data/demo.db 重建一个示例库（每次启动重建，绝不触碰真实的 data/lens.db）。条目全部取自真实存在的知名 AI 事件/论文/项目，摘要忠实于公开事实；打分和 comment 是虚构的示例，用来演示 triage 流。",
+  "items": [
+    {
+      "source_key": "anthropic-news", "source_name": "Anthropic Newsroom", "tier": "P0", "category": "company",
+      "title": "Introducing Claude Opus 4.5",
+      "url": "https://www.anthropic.com/news/claude-opus-4-5",
+      "summary": "Claude Opus 4.5 is here: our best model for coding, agents, and computer use.",
+      "author": "Anthropic", "published_at": "2025-11-24T16:00:00+00:00",
+      "score": 5, "tags": "model,frontier,agent", "status": "promoted",
+      "comment": "Opus 系列回归且价格大降，agent 路线押注明显。值得对比上代的 SWE-bench 数据。",
+      "ai_summary": "Anthropic 发布 Claude Opus 4.5：主打编码、agent 与 computer use 能力，API 定价较上代大幅下调，配套长任务执行方面的改进。",
+      "ai_detail": {
+        "points": [
+          "在 SWE-bench Verified 等编码基准上超过前代模型",
+          "API 定价相对 Opus 4.1 大幅下降，旗舰能力使用门槛降低",
+          "与 Claude Code、computer use 等 agent 场景深度绑定"
+        ],
+        "why": "旗舰模型价格大降通常会改变团队的默认选型，对 agent 工作流的成本结构影响直接。"
+      }
+    },
+    {
+      "source_key": "openai-news", "source_name": "OpenAI News", "tier": "P0", "category": "company",
+      "title": "Introducing GPT-5",
+      "url": "https://openai.com/index/introducing-gpt-5/",
+      "summary": "GPT-5 is our smartest, fastest, most useful model yet, with built-in thinking.",
+      "author": "OpenAI", "published_at": "2025-08-07T17:00:00+00:00",
+      "score": 4, "tags": "model,frontier", "status": "reviewed",
+      "comment": "统一路由的思路值得注意：用户不再自己挑模型，下游应用的兼容性要重新测。",
+      "ai_summary": "OpenAI 发布 GPT-5：统一系统自动在快速回答与深度推理之间路由，并在 ChatGPT 中全量替换旧模型，免费用户也可用。",
+      "ai_detail": {
+        "points": [
+          "用实时路由整合快速模型与推理模型，按任务复杂度切换",
+          "编码、数学、多模态基准较 GPT-4o / o3 提升",
+          "ChatGPT 端默认全量切换旧模型"
+        ],
+        "why": "「自己挑模型」这个交互被产品化地隐藏了——依赖特定模型行为的下游应用面临兼容性风险。"
+      }
+    },
+    {
+      "source_key": "anthropic-engineering", "source_name": "Anthropic Engineering", "tier": "P0", "category": "company",
+      "title": "Building effective agents",
+      "url": "https://www.anthropic.com/engineering/building-effective-agents",
+      "summary": "What we've learned from working with dozens of teams building LLM agents.",
+      "author": "Anthropic", "published_at": "2024-12-19T00:00:00+00:00",
+      "score": 5, "tags": "agent,engineering", "status": "promoted",
+      "comment": "被引用最多的 agent 工程文章，workflow vs agent 的分法到现在还是最清晰的。",
+      "ai_summary": "Anthropic 工程团队总结一年 agent 实践：大多数成功系统用的是简单可组合的 workflow 模式而非复杂框架，并给出何时才值得做真正 agent 的判断标准。",
+      "ai_detail": {
+        "points": [
+          "区分 workflow（预编排）与 agent（模型自主决定路径）两类系统",
+          "总结 prompt chaining、routing、parallelization、orchestrator-workers、evaluator-optimizer 五种常见模式",
+          "建议从最简单方案开始，只在确有需要时增加自主性"
+        ],
+        "why": "agent 框架泛滥的当下，这篇给出了「什么时候不需要 agent」的工程判断力。"
+      }
+    },
+    {
+      "source_key": "deepmind-blog", "source_name": "Google DeepMind Blog", "tier": "P0", "category": "company",
+      "title": "AlphaFold 3 predicts the structure and interactions of all of life's molecules",
+      "url": "https://blog.google/technology/ai/google-deepmind-isomorphic-alphafold-3-ai-model/",
+      "summary": "AlphaFold 3 can predict the structure and interactions of proteins, DNA, RNA and more.",
+      "author": "Google DeepMind", "published_at": "2024-05-08T15:00:00+00:00",
+      "score": 4, "tags": "ai4science", "status": "reviewed",
+      "comment": "结构预测扩到全分子相互作用，AI for science 的标杆进展。",
+      "ai_summary": "DeepMind 与 Isomorphic Labs 发布 AlphaFold 3：可预测蛋白质、DNA、RNA 与小分子配体的联合结构与相互作用，并开放 AlphaFold Server 供非商业研究使用。",
+      "ai_detail": {
+        "points": [
+          "从蛋白质单体结构扩展到跨分子类型的复合体相互作用预测",
+          "配体结合结构预测精度较现有对接方法显著提升",
+          "AlphaFold Server 提供免费的非商业访问"
+        ],
+        "why": "AI for science 的代表性进展，直接影响药物发现管线的早期效率。"
+      }
+    },
+    {
+      "source_key": "mistral-changelog", "source_name": "Mistral Changelog", "tier": "P0", "category": "api_change",
+      "title": "Introducing Mistral Medium 3",
+      "url": "https://mistral.ai/news/mistral-medium-3",
+      "summary": "Frontier-class performance at significantly lower cost.",
+      "author": "Mistral AI", "published_at": "2025-05-07T12:00:00+00:00",
+      "score": null, "tags": null, "status": "captured", "comment": null,
+      "ai_summary": null, "ai_detail": null
+    },
+    {
+      "source_key": "hf-daily-papers", "source_name": "Hugging Face Daily Papers", "tier": "P0", "category": "paper",
+      "title": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+      "url": "https://arxiv.org/abs/2501.12948",
+      "summary": "We introduce DeepSeek-R1-Zero and DeepSeek-R1, reasoning models trained via large-scale reinforcement learning.",
+      "author": "DeepSeek-AI", "published_at": "2025-01-22T00:00:00+00:00",
+      "score": 5, "tags": "rl,reasoning,open-weights", "status": "promoted",
+      "comment": "纯 RL 不靠 SFT 冷启动也能长出推理能力；蒸馏小模型那部分对开源生态影响最大。",
+      "ai_summary": "DeepSeek 发布 R1 系列推理模型：R1-Zero 证明纯强化学习（无 SFT）即可涌现推理能力，R1 在数学与编码基准对标 OpenAI o1，并开源多个蒸馏小模型。",
+      "ai_detail": {
+        "points": [
+          "R1-Zero 仅用 GRPO 强化学习训练即出现自我验证、反思等推理行为",
+          "R1 在 AIME、MATH-500、Codeforces 等基准接近或超过 o1",
+          "开源 1.5B–70B 蒸馏模型，把推理能力下放到消费级硬件"
+        ],
+        "why": "推理训练配方首次被完整开源，直接改变开源模型与闭源前沿的差距预期。"
+      }
+    },
+    {
+      "source_key": "arxiv", "source_name": "arXiv (cs.CL / cs.LG / cs.AI)", "tier": "P0", "category": "paper",
+      "title": "The Llama 3 Herd of Models",
+      "url": "https://arxiv.org/abs/2407.21783",
+      "summary": "This paper presents the Llama 3 family of foundation models, including a 405B parameter dense Transformer.",
+      "author": "Llama Team, AI @ Meta", "published_at": "2024-07-31T00:00:00+00:00",
+      "score": 4, "tags": "pretraining,open-weights", "status": "reviewed",
+      "comment": "405B 稠密模型的训练细节披露得很全，数据配比部分值得细读。",
+      "ai_summary": "Meta 发布 Llama 3 技术报告：405B 旗舰稠密模型 + 70B/8B，详述约 15T token 预训练数据处理、缩放定律应用与多模态扩展实验。",
+      "ai_detail": {
+        "points": [
+          "405B 稠密模型在多数基准对标 GPT-4 级别",
+          "详尽披露数据清洗、退火、合成数据与训练基础设施细节",
+          "附带视觉、语音多模态适配的实验性结果"
+        ],
+        "why": "开源界少有的全透明大模型训练报告，是研究训练配方的一手材料。"
+      }
+    },
+    {
+      "source_key": "alphaxiv", "source_name": "alphaXiv", "tier": "P2", "category": "paper",
+      "title": "Attention Is All You Need",
+      "url": "https://arxiv.org/abs/1706.03762",
+      "summary": "We propose a new simple network architecture, the Transformer, based solely on attention mechanisms.",
+      "author": "Vaswani et al.", "published_at": "2017-06-12T00:00:00+00:00",
+      "score": 5, "tags": "classic,transformer", "status": "promoted",
+      "comment": "一切的起点。alphaXiv 上又被翻起来了，回头重读 positional encoding 一节别有味道。",
+      "ai_summary": "Transformer 开山之作：抛弃循环与卷积、仅用自注意力机制构建序列转换模型，奠定此后所有大语言模型的架构基础。",
+      "ai_detail": {
+        "points": [
+          "multi-head self-attention + 位置编码的组合实现完全并行化训练",
+          "在 WMT14 翻译任务上以更少训练成本取得当时最优",
+          "成为 GPT / BERT 等后续主流模型的架构基座"
+        ],
+        "why": "理解现代 LLM 架构的必读原点论文。"
+      }
+    },
+    {
+      "source_key": "simon-willison", "source_name": "Simon Willison", "tier": "P1", "category": "researcher_note",
+      "title": "Things we learned about LLMs in 2024",
+      "url": "https://simonwillison.net/2024/Dec/31/llms-in-2024/",
+      "summary": "A lot has happened in the world of Large Language Models over the course of 2024.",
+      "author": "Simon Willison", "published_at": "2024-12-31T18:00:00+00:00",
+      "score": 5, "tags": "yearly-review", "status": "promoted",
+      "comment": "年度综述里写得最诚实的一篇，价格暴跌和多模态普及两条线特别清楚。",
+      "ai_summary": "Simon Willison 年度盘点：2024 年 GPT-4 级模型从一家独有变成多家标配、推理成本大幅下降、多模态走向日常可用，同时批评「agent」一词定义混乱。",
+      "ai_detail": {
+        "points": [
+          "GPT-4 同级模型年内从一家扩散到多家机构",
+          "LLM 推理价格一年内下降超过一个数量级",
+          "视觉/音频多模态从演示走向日常可用",
+          "对「agents」一词的滥用提出批评"
+        ],
+        "why": "信息密度极高的一手年度地图，适合校准对行业进展的整体判断。"
+      }
+    },
+    {
+      "source_key": "lilian-weng", "source_name": "Lilian Weng (Lil'Log)", "tier": "P1", "category": "researcher_note",
+      "title": "LLM Powered Autonomous Agents",
+      "url": "https://lilianweng.github.io/posts/2023-06-23-agent/",
+      "summary": "Building agents with LLM as its core controller: planning, memory, and tool use.",
+      "author": "Lilian Weng", "published_at": "2023-06-23T00:00:00+00:00",
+      "score": 4, "tags": "agent,survey", "status": "reviewed",
+      "comment": "planning / memory / tool-use 三分框架至今仍是 agent 综述的默认结构。",
+      "ai_summary": "Lilian Weng 系统综述 LLM 驱动的自主 agent：以规划、记忆、工具使用三大组件为框架，梳理任务分解、自我反思、向量记忆与工具调用的代表性方法。",
+      "ai_detail": {
+        "points": [
+          "提出 planning / memory / tool use 三组件分析框架",
+          "覆盖 ReAct、Reflexion、HuggingGPT 等代表性方法",
+          "坦率列出可靠性与上下文长度等根本限制"
+        ],
+        "why": "agent 领域被引用最多的框架性综述，入门和校准术语都用得上。"
+      }
+    },
+    {
+      "source_key": "karpathy", "source_name": "Andrej Karpathy", "tier": "P1", "category": "researcher_note",
+      "title": "A Recipe for Training Neural Networks",
+      "url": "https://karpathy.github.io/2019/04/25/recipe/",
+      "summary": "Neural net training fails silently. A recipe to follow when you train them.",
+      "author": "Andrej Karpathy", "published_at": "2019-04-25T00:00:00+00:00",
+      "score": 4, "tags": "training,checklist", "status": "reviewed",
+      "comment": "「神经网络默默失败」这个观察永不过时，里面的调参 checklist 今天还能直接用。",
+      "ai_summary": "Karpathy 的训练手册：神经网络训练会「默默失败」，给出从数据检查、搭端到端骨架到逐步加复杂度、正则化与调参的完整流程清单。",
+      "ai_detail": {
+        "points": [
+          "核心观察：NN 的失败是静默的，流程纪律比技巧重要",
+          "先过拟合一个小 batch 再谈泛化等实操检查点",
+          "可直接复用的 step-by-step 训练 checklist"
+        ],
+        "why": "二十分钟读完能少踩数月的坑，工程味最浓的训练方法论。"
+      }
+    },
+    {
+      "source_key": "ossinsight-trending", "source_name": "GitHub Trending (OSSInsight)", "tier": "heat", "category": "repo",
+      "title": "ggml-org/llama.cpp",
+      "url": "https://github.com/ggml-org/llama.cpp",
+      "summary": "LLM inference in C/C++",
+      "author": null, "published_at": "2026-06-01T00:00:00+00:00",
+      "score": 3, "tags": "inference,local", "status": "reviewed",
+      "comment": "watchlist 常客，nightly 噪音大，但大版本还是要跟。",
+      "ai_summary": "llama.cpp 持续位居 GitHub trending：纯 C/C++ 的本地 LLM 推理引擎，量化与跨硬件支持使其成为端侧部署的事实标准。",
+      "ai_detail": {
+        "points": [
+          "纯 C/C++ 实现、无重依赖，覆盖 Metal / CUDA / Vulkan 等主流硬件",
+          "GGUF 量化格式成为本地模型分发的事实标准",
+          "活跃度极高，几乎每日发版"
+        ],
+        "why": "本地推理生态的中枢项目，跟踪它等于跟踪端侧 LLM 的能力边界。"
+      }
+    },
+    {
+      "source_key": "hf-models", "source_name": "Hugging Face 热门模型", "tier": "heat", "category": "repo",
+      "title": "deepseek-ai/DeepSeek-R1",
+      "url": "https://huggingface.co/deepseek-ai/DeepSeek-R1",
+      "summary": "DeepSeek-R1: open reasoning model with MIT license.",
+      "author": "deepseek-ai", "published_at": "2025-01-20T00:00:00+00:00",
+      "score": null, "tags": null, "status": "captured", "comment": null,
+      "ai_summary": "DeepSeek-R1 登上 Hugging Face 热门：MIT 许可的开源推理模型，671B MoE 架构（单次激活约 37B），提供完整权重与多个蒸馏版本。",
+      "ai_detail": {
+        "points": [
+          "MIT 许可证，可商用",
+          "671B 参数 MoE，单次激活约 37B",
+          "配套 1.5B–70B 蒸馏模型适配不同算力"
+        ],
+        "why": "开源推理模型的标杆 checkpoint，下载量与衍生微调数量都在第一梯队。"
+      }
+    },
+    {
+      "source_key": "ossinsight-trending", "source_name": "GitHub Trending (OSSInsight)", "tier": "heat", "category": "repo",
+      "title": "vllm-project/vllm",
+      "url": "https://github.com/vllm-project/vllm",
+      "summary": "A high-throughput and memory-efficient inference and serving engine for LLMs",
+      "author": null, "published_at": "2026-05-20T00:00:00+00:00",
+      "score": null, "tags": null, "status": "captured", "comment": null,
+      "ai_summary": "vLLM 进入 trending：以 PagedAttention 为核心的高吞吐 LLM 推理服务引擎，已成为开源模型线上部署的主流选择。",
+      "ai_detail": {
+        "points": [
+          "PagedAttention 显存分页管理大幅提升吞吐",
+          "支持连续批处理、前缀缓存、投机解码等服务端优化",
+          "提供 OpenAI 兼容 API，与 HF 生态无缝衔接"
+        ],
+        "why": "llama.cpp 是端侧标准，vLLM 是服务端标准——部署选型绕不开。"
+      }
+    },
+    {
+      "source_key": "sec-latest-filings", "source_name": "SEC Latest Filings (Atom)", "tier": "P0", "category": "filing",
+      "title": "NVIDIA CORP — Form 10-K (Annual report)",
+      "url": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001045810&type=10-K",
+      "summary": "Form 10-K — Annual report for fiscal year ended January 26, 2025",
+      "author": "NVIDIA CORP", "published_at": "2025-02-26T21:00:00+00:00",
+      "score": null, "tags": null, "status": "captured", "comment": null,
+      "ai_summary": null, "ai_detail": null
+    },
+    {
+      "source_key": "a16z-portfolio", "source_name": "a16z Portfolio / News", "tier": "P2", "category": "funding",
+      "title": "Investing in Mistral",
+      "url": "https://a16z.com/announcement/investing-in-mistral/",
+      "summary": "We are excited to announce our investment in Mistral AI.",
+      "author": "a16z", "published_at": "2023-12-11T00:00:00+00:00",
+      "score": 1, "tags": "funding", "status": "ignored",
+      "comment": "投资公告本身没增量，信息已经从别处知道了。",
+      "ai_summary": "a16z 宣布投资 Mistral AI（参与 A 轮，估值约 20 亿美元），押注开放权重模型路线与欧洲 AI 生态。",
+      "ai_detail": {
+        "points": [
+          "a16z 参与 Mistral A 轮，估值约 20 亿美元",
+          "投资论点：开放权重模型将在生态中占据重要位置"
+        ],
+        "why": "投融资信号：一线基金对开源模型路线的明确背书。"
+      }
+    },
+    {
+      "source_key": "hn-algolia", "source_name": "Hacker News (Algolia)", "tier": "heat", "category": "other",
+      "title": "GPT-4o",
+      "url": "https://openai.com/index/hello-gpt-4o/",
+      "summary": "GPT-4o (o for omni) accepts any combination of text, audio, and image as input.",
+      "author": null, "published_at": "2024-05-13T17:00:00+00:00",
+      "score": 3, "tags": "multimodal", "status": "reviewed",
+      "comment": "HN 讨论主要集中在实时语音 demo 的延迟数字上。",
+      "ai_summary": "OpenAI 发布 GPT-4o（omni）登上 HN 头条：原生多模态端到端模型，音频对话延迟接近人类水平，并向免费用户开放。",
+      "ai_detail": {
+        "points": [
+          "文本/视觉/音频端到端单模型，音频平均延迟约 320ms",
+          "GPT-4 级能力但 API 价格减半、速度翻倍",
+          "免费用户首次用上 GPT-4 级模型"
+        ],
+        "why": "交互形态的转折点：实时语音多模态从 demo 变成可用产品。"
+      }
+    }
+  ],
+  "threads": [
+    {
+      "item_index": 5,
+      "path": "data.example/discussions/2026-06-08-example-paper.md",
+      "comment": "纯 RL 路线对蒸馏小模型意味着什么？"
+    }
+  ]
+}

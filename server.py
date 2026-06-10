@@ -12,16 +12,22 @@ Endpoints
   POST /api/discussion/append    -> {path, content}  append 回填 into a discussion file
   POST /api/ideas                -> {title?, body, parked, item_id?} capture an idea
 
-Run:  python3 server.py [--port 8787]
-The frontend under web/ is an intentional PLACEHOLDER — design is the next step.
+Run:  python3 server.py [--port 8787] [--open] [--demo]
+  --open  启动后自动打开浏览器
+  --demo  用 data.example/seed_items.json 重建 data/demo.db 并以它起看板——
+          克隆下来不采集、不跑 LLM 也能看到完整效果；绝不触碰真实的 data/lens.db。
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
+import shutil
 import sqlite3
+import threading
 import urllib.parse
+import webbrowser
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -31,6 +37,8 @@ import yaml
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 DB_PATH = ROOT / "data" / "lens.db"
+DEMO_DB_PATH = ROOT / "data" / "demo.db"
+DEMO_SEED_PATH = ROOT / "data.example" / "seed_items.json"
 SOURCES_PATH = ROOT / "sources.yml"
 TEMPLATE = ROOT / "templates" / "discussion.md"
 DISCUSSIONS = ROOT / "data" / "discussions"
@@ -368,23 +376,51 @@ class Handler(BaseHTTPRequestHandler):
         # unique_path guarantees we never overwrite an existing discussion (incl. 回填).
         target = unique_path(DISCUSSIONS, f"{date}-{item_id[:8]}-{slugify(item['title'])}")
 
+        # AI 整理结果一并带进讨论稿——讨论质量取决于上下文质量，只给原始英文摘要
+        # 等于把 summarize.py 的产出丢在门外（Codex 评审建议）。
+        ai_block = "（这条还没跑 AI 总结。`python3 summarize.py` 之后再生成的讨论稿会带上 AI 整理结果。）"
+        if item.get("ai_summary"):
+            parts = [f"**AI 摘要**：{item['ai_summary']}"]
+            try:
+                detail = json.loads(item.get("ai_detail") or "{}")
+            except ValueError:
+                detail = {}
+            points = [p for p in (detail.get("points") or []) if isinstance(p, str) and p.strip()]
+            if points:
+                parts.append("**要点**：\n" + "\n".join(f"- {p}" for p in points))
+            if detail.get("why"):
+                parts.append(f"**为什么值得看**：{detail['why']}")
+            ai_block = "\n\n".join(parts)
+        excerpt = (item.get("content_text") or "").strip()
+        if len(excerpt) > 1500:
+            excerpt = excerpt[:1500] + "\n…（原文较长已截断，完整内容见上面的链接。）"
+        if not excerpt:
+            excerpt = "（未抓到原文正文，请按上面的链接读原文。）"
+        # 节选会进 fenced block：压掉原文里的反引号串，防止它提前闭合围栏、
+        # 让外部内容「越狱」到指令区（Codex review 指出的注入面）
+        excerpt = re.sub(r"`{3,}", "'''", excerpt)
+
         doc = TEMPLATE.read_text()
         repl = {
-            "{title}": item.get("title") or "(无标题)",
-            "{source_name}": item.get("source_name") or item.get("source_key") or "",
-            "{tier}": item.get("tier") or "",
-            "{category}": item.get("category") or "",
-            "{url}": item.get("url") or "",
-            "{published_at}": item.get("published_at") or "（未知）",
-            "{author}": item.get("author") or "（未知）",
-            "{score}": "—" if item.get("score") is None else str(item["score"]),
-            "{status}": item.get("status") or "",
-            "{tags}": item.get("tags") or "（无）",
-            "{summary}": item.get("summary") or "（无摘要）",
-            "{comment}": comment or "（这次没写 comment，直接让 AI 帮我看这条值不值得关注。）",
+            "title": item.get("title") or "(无标题)",
+            "source_name": item.get("source_name") or item.get("source_key") or "",
+            "tier": item.get("tier") or "",
+            "category": item.get("category") or "",
+            "url": item.get("url") or "",
+            "published_at": item.get("published_at") or "（未知）",
+            "author": item.get("author") or "（未知）",
+            "score": "—" if item.get("score") is None else str(item["score"]),
+            "status": item.get("status") or "",
+            "tags": item.get("tags") or "（无）",
+            "summary": item.get("summary") or "（无摘要）",
+            "ai_digest": ai_block,
+            "content_excerpt": excerpt,
+            "comment": comment or "（这次没写 comment，直接让 AI 帮我看这条值不值得关注。）",
         }
-        for k, v in repl.items():
-            doc = doc.replace(k, v)
+        # 单遍替换：替换进来的值不再参与后续匹配。逐个 str.replace 时，抓来的
+        # 原文/标题里若有字面 {comment} 这类 token，会被后续轮次二次展开，把私人
+        # 评注注入「忠实原文」中间（对抗审查抓出的注入面）。
+        doc = re.sub(r"\{(\w+)\}", lambda m: repl.get(m.group(1), m.group(0)), doc)
         target.write_text(doc)
 
         rel = str(target.relative_to(ROOT))
@@ -450,15 +486,88 @@ class Handler(BaseHTTPRequestHandler):
         return {"path": str(target.relative_to(ROOT)), "parked": False}
 
 
+def build_demo_db(db_path: Path = DEMO_DB_PATH, seed_path: Path = DEMO_SEED_PATH) -> int:
+    """从 data.example/seed_items.json 重建演示库，返回写入的 item 数。
+
+    每次重建（旧 demo.db 直接删掉）：demo 是个可随便玩的沙盒，重启即复原。
+    用独立的 demo.db 而不是写 lens.db——已有真实数据的用户跑 --demo 时，
+    示例条目绝不能混进真库（INSERT OR IGNORE 也挡不住「污染」这件事）。"""
+    seed = json.loads(seed_path.read_text())
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    if db_path.exists():
+        db_path.unlink()
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript((ROOT / "schema.sql").read_text())
+        now = now_iso()
+        ids = []
+        for it in seed.get("items", []):
+            iid = hashlib.sha1(f"{it['source_key']}\n{it['url']}".encode("utf-8")).hexdigest()
+            ids.append(iid)
+            detail = it.get("ai_detail")
+            triaged = it.get("status", "captured") != "captured" or any(
+                it.get(k) is not None for k in ("score", "tags", "comment"))
+            conn.execute(
+                """INSERT OR IGNORE INTO items
+                   (id, source_key, source_name, tier, category, title, url, summary, author,
+                    published_at, fetched_at, score, tags, status, comment, triaged_at,
+                    ai_summary, ai_detail, ai_model, ai_summarized_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (iid, it["source_key"], it.get("source_name"), it.get("tier"), it.get("category"),
+                 it.get("title"), it["url"], it.get("summary"), it.get("author"),
+                 it.get("published_at"), now,
+                 it.get("score"), it.get("tags"), it.get("status") or "captured", it.get("comment"),
+                 now if triaged else None,
+                 it.get("ai_summary"),
+                 json.dumps(detail, ensure_ascii=False) if detail else None,
+                 "codex" if it.get("ai_summary") else None,
+                 now if it.get("ai_summary") else None),
+            )
+        for th in seed.get("threads", []):
+            idx = th.get("item_index")
+            if not isinstance(idx, int) or not (0 <= idx < len(ids)):
+                continue
+            conn.execute(
+                "INSERT INTO threads(item_id, path, comment, created_at) VALUES (?,?,?,?)",
+                (ids[idx], th.get("path"), th.get("comment"), now),
+            )
+        conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('last_collect', ?)", (now,))
+        conn.commit()
+        return len(ids)
+    finally:
+        conn.close()
+
+
 def main() -> None:
+    global DB_PATH, DISCUSSIONS, IDEAS
     ap = argparse.ArgumentParser(description="lens local server")
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--open", action="store_true", help="启动后自动打开浏览器")
+    ap.add_argument("--demo", action="store_true",
+                    help="用示例数据起看板（重建 data/demo.db，不碰真实 lens.db）")
     args = ap.parse_args()
+    if args.demo:
+        n = build_demo_db()
+        DB_PATH = DEMO_DB_PATH
+        # 讨论/灵感的 markdown 写入也要进沙盒：demo 承诺「不碰真实数据」，
+        # 不能让示例讨论稿落进用户私有的 data/discussions（Codex review 指出）。
+        sandbox = ROOT / "data" / "demo-sandbox"
+        shutil.rmtree(sandbox, ignore_errors=True)
+        DISCUSSIONS = sandbox / "discussions"
+        IDEAS = sandbox / "ideas"
+        print(f"DEMO 模式：示例数据 {n} 条 → data/demo.db + data/demo-sandbox/"
+              "（每次启动重建，真实数据不受影响）")
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        print("⚠ 看板没有任何鉴权：绑定到非 loopback 地址会把你的私有数据和写接口"
+              "暴露给同网段，确认你真的需要这样。")
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"lens → http://{args.host}:{args.port}  (Ctrl-C to stop)")
+    url = f"http://{args.host}:{args.port}"
+    print(f"lens → {url}  (Ctrl-C to stop)")
     if not DB_PATH.exists():
-        print("  note: data/lens.db missing — run `python3 collect.py` to populate the board.")
+        print("  note: data/lens.db missing — run `python3 collect.py`（或先 `python3 server.py --demo` 看示例）")
+    if args.open:
+        threading.Timer(0.4, webbrowser.open, [url]).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
