@@ -88,6 +88,7 @@ let itemsCache = [];
 let current = null;       // 当前选中的（已保存的）item 行
 let selectedIndex = -1;
 let draft = null;         // { score, tags:[], status, comment } 暂存的评判改动
+const draftCache = new Map(); // item_id -> 未保存的 draft：快速扫条目时切走不丢评判，保存成功即清
 let discussion = null;    // { path, content } 本次生成的讨论稿
 const recentIdeas = [];   // 本会话记下的灵感（接口无列表，故本地维护）
 const backfills = {};     // path -> 本会话已回填次数（接口不返回，故本地累计）
@@ -136,6 +137,21 @@ async function refreshBoard() {
 // ================= 左栏 rail =================
 function buildRail() {
   railEl.innerHTML = '';
+
+  // 待看队列：晨间的固定起点 = 新进 + 精选排序，一键清掉其他筛选
+  railEl.append(el('button', {
+    class: 'inbox-btn', id: 'inbox-btn', type: 'button',
+    title: '回到晨间队列：未处理的新条目，按信号层级排',
+    onclick: () => {
+      Object.assign(filters, { status: 'captured', tier: '', source: '', min_score: '', q: '', sort: 'smart', topic: '' });
+      const q = $('#q'); if (q) q.value = '';
+      const sel = $('#sourcesel'); if (sel) sel.value = '';
+      updateSourceDesc(); syncRail(); syncTopicTabs(); loadItems();
+    },
+  },
+    el('span', { text: '待看队列' }),
+    el('span', { class: 'num', id: 'inbox-count' }, '0'),
+  ));
 
   // 搜索
   const search = el('div', { class: 'search' });
@@ -219,6 +235,8 @@ function chipRow(opts, getActive, onPick, kind) {
 
 // 重新同步 rail 上所有 chip / nav 的选中态（不重建 DOM）
 function syncRail() {
+  const inbox = $('#inbox-btn');
+  if (inbox) inbox.classList.toggle('on', filters.status === 'captured' && filters.sort === 'smart');
   railEl.querySelectorAll('.navrow').forEach((n) =>
     n.classList.toggle('on', n.dataset.status === filters.status));
   railEl.querySelectorAll('[data-chiprow="tier"] .chip').forEach((c) =>
@@ -236,6 +254,8 @@ function syncRail() {
 
 function updateRailCounts() {
   const bs = statsCache.by_status || {};
+  const inboxN = $('#inbox-count');
+  if (inboxN) inboxN.textContent = numfmt(bs.captured || 0);
   railEl.querySelectorAll('.navrow .num').forEach((n) => {
     const key = n.dataset.count;
     n.textContent = numfmt(key === '__total' ? statsCache.total : (bs[key] || 0));
@@ -417,15 +437,27 @@ function highlightRow() {
 }
 
 // ================= 右栏 详情 =================
+// 切走前把没保存的评判改动收进 draftCache（回来时恢复）；改动已还原则清掉缓存
+function stashDraft() {
+  if (!current || !draft) return;
+  if (Object.keys(collectChanges()).length) draftCache.set(current.id, draft);
+  else draftCache.delete(current.id);
+}
+
 function selectItem(it, idx) {
+  // 在 stashDraft 之前判断：从别的条目（或空态/Esc 取消后）回到这条且有缓存草稿，
+  // 都要提示「已恢复」——面板显示的不是库里的值，用户必须知道
+  const cameBack = (!current || current.id !== it.id) && draftCache.has(it.id);
+  stashDraft();
   current = it;
   selectedIndex = idx;
-  draft = {
+  draft = draftCache.get(it.id) || {
     score: it.score == null ? null : Number(it.score),
     tags: (it.tags || '').split(',').map((t) => t.trim()).filter(Boolean),
     status: it.status,
     comment: it.comment || '',
   };
+  if (cameBack) toast('已恢复未保存的评判草稿');
   discussion = null;
   renderDetail();
   highlightRow();
@@ -444,6 +476,7 @@ async function loadItemContent(it) {
 }
 
 function deselect() {
+  stashDraft();
   current = null; selectedIndex = -1; draft = null; discussion = null;
   renderDetail();
   highlightRow();
@@ -613,7 +646,7 @@ function triageBlock() {
 
   // 保存
   const save = el('button', { class: 'btn btn-primary', id: 'save', type: 'button', onclick: saveAndNext }, '保存评判');
-  block.append(el('div', { class: 'save-row' }, save, el('span', { class: 'hint mono', text: '⌘S 保存并看下一条' })));
+  block.append(el('div', { class: 'save-row' }, save, el('span', { class: 'hint mono', text: '⌘S 保存并下一条 · ? 全部快捷键' })));
 
   return block;
 }
@@ -668,25 +701,37 @@ function collectChanges() {
   return c;
 }
 
+let saving = false;            // 在途保存闸：r/p/x 连击或保存中导航不许打架
 async function saveAndNext() {
-  if (!current) return;
+  if (!current || saving) return;
   const changes = collectChanges();
   const curId = current.id;      // refreshBoard 可能因筛选把 current 清空，先存下 id
   const nextId = itemsCache[selectedIndex + 1]?.id || null;
 
-  if (Object.keys(changes).length) {
-    try {
-      await api(`/api/items/${curId}`, POST(changes));
-    } catch (e) { toast('保存失败：' + e.message, true); return; }
-    toast('已保存');
-    await refreshBoard();         // 刷新列表行 + 计数（loadItems 可能已把被筛掉的 current 清空）
-    if (nextId && itemsCache.some((x) => x.id === nextId)) selectById(nextId);
-    else if (itemsCache.some((x) => x.id === curId)) selectById(curId);
-    else deselect();
-  } else {
+  if (!Object.keys(changes).length) {
     // 无改动：直接看下一条
     if (nextId) { selectById(nextId); }
     else toast('已是最后一条');
+    return;
+  }
+  saving = true;
+  try {
+    try {
+      await api(`/api/items/${curId}`, POST(changes));
+    } catch (e) { toast('保存失败：' + e.message, true); return; }
+    draftCache.delete(curId);   // 已落库，草稿不再算「未保存」
+    // 已保存的值同步回 current 行对象：loadItems 保选中时不替换引用，若不同步，
+    // 下次 stashDraft 会拿「保存前的旧行」做基线，把刚清掉的缓存原样塞回去
+    //（对抗审查抓出的 P1：假「已恢复草稿」提示）。
+    Object.assign(current, changes);
+    toast('已保存');
+    await refreshBoard();         // 刷新列表行 + 计数（loadItems 可能已把被筛掉的 current 清空）
+    if (current && current.id !== curId) return;  // 保存等待期间用户已自行导航，别拽回来
+    if (nextId && itemsCache.some((x) => x.id === nextId)) selectById(nextId);
+    else if (itemsCache.some((x) => x.id === curId)) selectById(curId);
+    else deselect();
+  } finally {
+    saving = false;
   }
 }
 
@@ -860,6 +905,48 @@ function move(delta) {
   selectItem(itemsCache[idx], idx);
 }
 
+// 一键归档：改状态 + 保存 + 跳下一条（晨间清队列的主操作）
+function triageTo(status) {
+  if (!current) return;
+  draft.status = status;
+  updateStatusPills();
+  saveAndNext();
+}
+
+// —— 快捷键帮助浮层 ——
+const HELP_ROWS = [
+  ['j / k', '下一条 / 上一条（↑ ↓ 同）'],
+  ['0 – 5', '评分'],
+  ['r / p / x', '已读 / 收藏 / 忽略 —— 保存并看下一条'],
+  ['s 或 ⌘S', '保存评判并看下一条'],
+  ['c', '聚焦评注框'],
+  ['g', '生成讨论稿'],
+  ['o', '打开原文'],
+  ['i', '聚焦灵感框'],
+  ['?', '开关本帮助'],
+  ['Esc', '关帮助 / 退出输入框 / 取消选中'],
+];
+
+const isHelpOpen = () => !!$('#kbd-overlay');
+
+function toggleHelp(force) {
+  const existing = $('#kbd-overlay');
+  const show = force != null ? force : !existing;
+  if (!show) { existing && existing.remove(); return; }
+  if (existing) return;
+  const ov = el('div', {
+    id: 'kbd-overlay', class: 'kbd-overlay',
+    onclick: (e) => { if (e.target === ov) toggleHelp(false); },
+  });
+  const card = el('div', { class: 'kbd-card' },
+    el('div', { class: 'kbd-title serif', text: '键盘流 — 手不离键盘清完待看' }));
+  for (const [keys, desc] of HELP_ROWS) {
+    card.append(el('div', { class: 'kbd-row' }, el('kbd', { text: keys }), el('span', { text: desc })));
+  }
+  ov.append(card);
+  document.body.append(ov);
+}
+
 document.addEventListener('keydown', (e) => {
   const ae = document.activeElement;
   const editing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT');
@@ -873,15 +960,22 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
+  // 帮助浮层开着时只响应 Esc / ?：用户正对着说明试键，不能让 x/r/p 在背后真归档
+  if (isHelpOpen() && e.key !== 'Escape' && e.key !== '?') return;
 
   switch (e.key) {
     case 'j': case 'ArrowDown': e.preventDefault(); move(1); break;
     case 'k': case 'ArrowUp': e.preventDefault(); move(-1); break;
-    case 'Escape': deselect(); break;
+    case 'Escape': if (isHelpOpen()) toggleHelp(false); else deselect(); break;
     case 's': case 'S': e.preventDefault(); saveAndNext(); break;
+    case 'r': case 'R': triageTo('reviewed'); break;
+    case 'p': case 'P': triageTo('promoted'); break;
+    case 'x': case 'X': triageTo('ignored'); break;
+    case 'c': case 'C': if (current) { e.preventDefault(); $('#comment')?.focus(); } break;
     case 'g': case 'G': if (current) genDiscussion(); break;
     case 'o': case 'O': if (current && current.url) window.open(current.url, '_blank', 'noopener'); break;
     case 'i': case 'I': if (current) { e.preventDefault(); $('#idea-body')?.focus(); } break;
+    case '?': e.preventDefault(); toggleHelp(); break;
     case '0': if (current) setScore(0); break;
     case '1': case '2': case '3': case '4': case '5':
       if (current) setScore(Number(e.key)); break;
@@ -894,6 +988,7 @@ document.addEventListener('keydown', (e) => {
   buildRail();
   buildListShell();
   renderDetail(); // 空态
+  $('#help-btn')?.addEventListener('click', () => toggleHelp());
   try {
     await loadSources();
     await loadStats();

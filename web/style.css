@@ -357,6 +357,44 @@ textarea.input{ min-height:78px; line-height:1.65; }
 /* toast */
 .toast{ position:fixed; left:50%; bottom:28px; transform:translateX(-50%) translateY(8px);
   background:var(--ink); color:var(--surface); padding:9px 18px; border-radius:var(--r-pill);
-  font-size:12.5px; opacity:0; pointer-events:none; transition:opacity .18s ease, transform .18s ease; z-index:50; }
+  font-size:12.5px; opacity:0; pointer-events:none; transition:opacity .18s ease, transform .18s ease; z-index:70; }
 .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
 .toast.err{ background:#7A4A42; }
+
+/* ---------------- 待看队列（晨间入口，rail 顶部常驻） ---------------- */
+.inbox-btn{
+  width:100%; display:flex; align-items:center; justify-content:space-between;
+  padding:9px 12px; margin-bottom:14px; border:1px solid var(--hair); border-radius:var(--r);
+  background:var(--raised); font-size:12.5px; font-weight:500; letter-spacing:.03em;
+  transition:border-color .12s ease;
+}
+.inbox-btn:hover{ border-color:var(--strong); }
+.inbox-btn.on{ background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
+.inbox-btn.on .num{ color:var(--on-accent); }
+
+/* ---------------- topbar 快捷键按钮 ---------------- */
+.top-right{ display:flex; align-items:center; gap:14px; }
+.help-btn{
+  width:24px; height:24px; flex:0 0 24px; border:1px solid var(--hair); border-radius:50%;
+  background:var(--raised); color:var(--ink-2); font-family:var(--mono); font-size:13px; line-height:1;
+}
+.help-btn:hover{ border-color:var(--strong); color:var(--ink); }
+
+/* ---------------- 快捷键帮助浮层（? 开关） ---------------- */
+.kbd-overlay{
+  position:fixed; inset:0; z-index:60; background:rgba(42,41,39,.32);
+  display:flex; align-items:center; justify-content:center;
+}
+.kbd-card{
+  width:390px; max-width:calc(100vw - 48px); max-height:80vh; overflow:auto;
+  background:var(--surface); border:1px solid var(--strong); border-radius:var(--r-lg);
+  padding:20px 22px 14px; box-shadow:0 18px 48px rgba(42,41,39,.22);
+}
+.kbd-title{ font-size:15px; margin:0 0 12px; }
+.kbd-row{ display:flex; align-items:baseline; gap:14px; padding:6px 0;
+  border-top:1px solid var(--hair); font-size:12.5px; color:var(--ink-2); }
+.kbd-row kbd{
+  flex:0 0 86px; font-family:var(--mono); font-size:12px; color:var(--ink);
+  background:var(--sunken); border:1px solid var(--hair); border-radius:4px;
+  padding:1px 6px; text-align:center;
+}
