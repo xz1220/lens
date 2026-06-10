@@ -54,9 +54,38 @@
   排序霸占 feed 顶部）；`digest: false` 标记不值得花 LLM 钱的源（sec-latest-filings
   全量申报流水）。存量噪声一次性清理（备份 data/lens.db.bak-20260610，只删未 triage 条目）。
 
+## 2026-06-11 · 双定位：个人日常工具 + 开源 AI 项目
+
+用户定调 lens 的两个核心定位：(1) 非常个人的信息源工作台（每天早上过滤/评论/记录），
+(2) 同时作为开源 AI 项目存在。本轮按 Codex 独立评审（三视角：日常用户/开源访客/维护者）
++ 自查落地，采纳意见见各条：
+
+- **D12 统一入口 = `lens.py`（stdlib subprocess 透传），不是 shell 脚本。**
+  - 晨间一条龙 `python3 lens.py`：采集 → 总结 → 看板，**单步失败不挡后续**（断网/没装
+    LLM CLI 时最坏也能打开看板处理已有条目）。Makefile 只是等价 sugar。
+  - 为什么不并成一个大脚本：collect / summarize / server 各自的 CLI 和测试已稳定，
+    入口只做编排不做逻辑。
+- **D13 demo 沙盒 = `server.py --demo` + 独立 `data/demo.db`，绝不写 lens.db。**
+  - Codex 原建议「demo 命令生成 data/lens.db」——被否：已有真实数据的用户跑 demo 会让
+    示例条目永久混进真库（INSERT OR IGNORE 防覆盖、防不了污染）。demo.db 每次启动重建，
+    玩坏即复原。
+  - 种子（`data.example/seed_items.json`）用**真实知名 AI 条目 + 忠实摘要**而非虚构新闻：
+    示例数据也遵守 D10 忠实原则，且让第一眼就有「这工具懂行」的真实感。打分/评论是
+    虚构示例（演示 triage 用）。
+- **D14 讨论稿必须带 AI 整理结果（`{ai_digest}` + `{content_excerpt}`）。**
+  - 此前模板只有原始英文摘要——把 summarize.py 的产出丢在门外（Codex 指出）。讨论质量
+    取决于上下文质量；没总结过的条目在讨论稿里诚实标注，不装有。
+- **D15 开源底线 = LICENSE(MIT) + CI（测试矩阵 + 隐私闸）+ CONTRIBUTING + demo 路径。**
+  - 隐私闸：CI 里 `git ls-files data` 非空即红——「工具开源思考私有」从约定升级为机器强制。
+  - 贡献主路径定为「接一个新源」：sources.yml 条目 + parse_* 纯函数 + fixture 测试。
+  - Codex 建议的 schema 迁移制度化（meta.schema_version + migrate.py）**暂不做**：
+    现 ALTER 方案有测试覆盖，等真有第二次 schema 变更再立规矩。
+- 看板日常动作收紧（Codex A2/A3/A5 全采纳）：「待看队列」固定入口（= captured + smart）、
+  `r/p/x` 归档键、`?` 速查浮层、draftCache 防丢未保存评判。
+
 ## 待用户拍板
 
-- feed 的智能排序 / 按天分组要不要做（目前 published_at DESC）。
+- push 到 GitHub 的时机（CI 徽章要补 owner/repo）；要不要挂进 life-os projects 索引。
 - collect + summarize 要不要定时化（cron）。
-- 17 个 `adapter: null` 的源按什么顺序接（哪些对你最有价值）。
+- 5 个 `adapter: null` 的降级源维持不追，还是有新的接入想法。
 - 讨论集成是否要从「手动 prompt」升级，以及升级成哪种。

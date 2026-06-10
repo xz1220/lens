@@ -1,0 +1,3 @@
+# lens 的全部第三方依赖（项目铁律：零额外依赖，其余只用 Python 标准库）。
+# summarize.py 的 LLM 引擎走本机 CLI（codex / claude），不在 pip 依赖里。
+PyYAML

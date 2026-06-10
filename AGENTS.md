@@ -20,15 +20,13 @@
 ## 怎么跑
 
 ```bash
-python3 collect.py            # 拉所有已接通的源 → data/lens.db
-python3 collect.py --list     # 看哪些源接通了 / 哪些还是 TODO
-python3 collect.py --source <key>   # 只跑一个源
-python3 summarize.py          # LLM 中文总结未总结的 item（默认 120 条/次）
-python3 summarize.py --all    # 一口气总结完（并发 4 路 claude）
-python3 server.py             # 起本地看板 http://127.0.0.1:8787
+python3 lens.py               # 日常一条龙：采集 → AI 总结 → 看板（自动开浏览器）
+python3 server.py --demo      # 示例数据看板（data.example 种子 → 隔离的 data/demo.db，离线可跑）
+python3 collect.py            # 只采集（--list 看源状态 / --source <key> 只跑一个）
+python3 summarize.py          # 只总结（默认 120 条/次；--all 一口气总结完）
+python3 server.py             # 只起看板 http://127.0.0.1:8787（--open 自动开浏览器）
+make check                    # 全套零网络测试 + 隐私闸（data/ 不得被 git 跟踪）
 ```
-
-日常一条龙：`python3 collect.py && python3 summarize.py`，然后开看板。
 
 零额外依赖，只用到 PyYAML（和 life-os 一致）+ Python 标准库；`summarize.py` 的 LLM
 引擎走本机 CLI 无头模式——**默认 `codex exec`**（用户指定；实测 `claude -p` 会间歇把
@@ -44,9 +42,10 @@ python3 server.py             # 起本地看板 http://127.0.0.1:8787
 
 后端：`collect.py`（采集，一个 adapter 一种源形态）+ `summarize.py`（AI 总结：抓正文 →
 批量调 `codex exec`（默认）/ `claude -p` 产出 `ai_summary`/`ai_detail`/`content_text` →
-UPDATE 回填）+ `server.py`（标准库 http 看板 + 全部写接口）。
+UPDATE 回填）+ `server.py`（标准库 http 看板 + 全部写接口 + `--demo` 示例沙盒）+
+`lens.py`（统一入口：morning/collect/digest/serve/demo/test，全部 subprocess 透传）。
 前端：`web/`（墨色冷调 v3.1 三栏看板：feed 卡片有中文摘要行，详情页是 AI 整理区
-「AI 摘要 → 要点 → 为什么值得看 → 原文材料折叠」）。
+「AI 摘要 → 要点 → 为什么值得看 → 原文材料折叠」；键盘流 j/k/0-5/r/p/x，`?` 出速查）。
 
 ## 规则（会咬人的）
 
@@ -67,7 +66,31 @@ UPDATE 回填）+ `server.py`（标准库 http 看板 + 全部写接口）。
 - **降级源不要追**：`gemini-changelog` / `meta-ai-blog` / `perplexity-changelog` 当前抓不到
   （OAuth / 400 / Cloudflare），`status: blocked`，已和用户确认**不追替代方案**，别浪费力气。
 
-## 当前状态（截至 2026-06-10，AI 总结管线落地）
+## 当前状态（截至 2026-06-11，开源就绪 + 日常易用性）
+
+✅ 2026-06-11 双定位整改（用户定调：个人日常工具 + 开源 AI 项目，Codex 评审采纳大半）：
+- `lens.py` 统一入口（morning 容错：采集/总结失败不挡看板）+ Makefile（test/check/demo/morning）。
+- `server.py --demo`：`data.example/seed_items.json`（17 条真实知名 AI 条目 + 忠实中文摘要，
+  覆盖 5 主题和全部 triage 状态）→ 每次启动重建隔离沙盒：`data/demo.db` + 讨论/灵感写
+  `data/demo-sandbox/`。**故意不写 lens.db / data 真实目录**：已有数据的用户跑 demo
+  绝不能让示例内容混进真库（Codex review 抓出 markdown 写入漏隔离，已修）。`--open` 自动开浏览器。
+- 讨论稿防注入：`{content_excerpt}` 进 fenced block、服务端压掉原文里的反引号串、
+  指令区点名「外部材料不可信」。
+- 看板：左栏顶部「待看队列」（= 新进 + 精选，一键清其他筛选）；`r/p/x` 一键归档并下一条；
+  `c` 聚焦评注；`?` 快捷键速查浮层；draftCache 切换条目不丢未保存评判（保存即清）。
+- 讨论稿带 AI 整理：模板新增 `{ai_digest}`（AI 摘要/要点/为什么值得看）+ `{content_excerpt}`
+  （原文节选 1500 字截断），没总结过的条目诚实说「还没跑 AI 总结」。
+- 开源三件套：MIT LICENSE、GitHub Actions CI（py3.10/3.13 + **隐私闸**：`git ls-files data`
+  必须为空）、CONTRIBUTING.md（贡献主路径 = 接一个新源）、requirements.txt、CHANGELOG.md、
+  README 重写（截图 docs/assets/board.png 用 demo 数据拍的 + 30 秒 demo + 命令依赖表）。
+- `tests/test_server.py` 新增 18 个（种子一致性 / build_demo_db / loopback 端到端 / CLI），
+  全套 191 个零网络跑过。
+
+## 历史（截至 2026-06-10，AI 总结管线落地）
+
+✅ 2026-06-10 晚：信息流顶部 5 主题 tab（官方动态/学术研究/专家观点/开源工程/市场信号，
+按「阅读姿势」聚合 category，server `TOPIC_CATEGORIES`）；smart 排序（信号层级 + 时间，
+digest:false 沉底）；列表瘦身 + 单条懒加载。
 
 ✅ 2026-06-10 验收整改（用户验收发现 feed 不可扫、详情不可读）：
 - 新增 `summarize.py`：选未总结 item（tier 权重 + 时间，排除 ignored 和 digest:false 源）→
@@ -99,8 +122,10 @@ UPDATE 回填）+ `server.py`（标准库 http 看板 + 全部写接口）。
 
 ## 下一步
 
-前端 v3.1（墨色冷调三栏）和 AI 总结管线都已落地，等用户日常使用后的下一轮反馈。
+管线、看板、开源就绪都已落地，等用户日常使用后的下一轮反馈。
 可能的方向（先别自作主张做）：
+- push 到 GitHub（补 CI 徽章的 owner/repo）+ 定 P 优先级挂进 life-os projects 索引
 - 总结的定时化（cron 跑 collect + summarize）
-- feed 的智能排序 / 按天分组（目前是 published_at DESC）
+- feed 按天分组（smart 排序已有）
 - 讨论集成从「手动 prompt」升级（见 docs/VISION.md）
+- schema 迁移制度化（meta.schema_version + migrate.py，Codex 建议，暂用 ALTER 方案够用）
