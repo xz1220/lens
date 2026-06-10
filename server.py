@@ -37,6 +37,16 @@ DISCUSSIONS = ROOT / "data" / "discussions"
 IDEAS = ROOT / "data" / "ideas"
 
 VALID_STATUS = {"captured", "reviewed", "promoted", "ignored"}
+
+# 主题 = 按「阅读姿势」对 category 的聚合（用户 2026-06-10 拍板的 5 分法）。
+# category 是采集时按源落库的细分类；主题是看板的主要浏览维度（信息流顶部 tab）。
+TOPIC_CATEGORIES = {
+    "official": ("company", "product", "api_change", "model_release"),  # 扫大厂动态
+    "research": ("paper",),                                             # 挑论文精读
+    "experts": ("researcher_note",),                                    # 专家长文
+    "oss": ("repo",),                                                   # 盯工具链/模型
+    "market": ("funding", "launch", "filing", "other"),                 # 看风向
+}
 CONTENT_TYPES = {".html": "text/html", ".js": "text/javascript", ".css": "text/css",
                  ".json": "application/json", ".svg": "image/svg+xml", ".ico": "image/x-icon"}
 
@@ -181,11 +191,15 @@ class Handler(BaseHTTPRequestHandler):
                 skip,
             ).fetchone()
             summarized, unsummarized = sm["s"] or 0, sm["p"] or 0
+        cats = conn.execute("SELECT category, COUNT(*) n FROM items GROUP BY category").fetchall()
+        by_cat = {r["category"]: r["n"] for r in cats}
+        by_topic = {t: sum(by_cat.get(c, 0) for c in cc) for t, cc in TOPIC_CATEGORIES.items()}
         conn.close()
         return {
             "total": total,
             "by_status": {r["status"]: r["n"] for r in rows},
             "by_tier": {r["tier"]: r["n"] for r in tiers},
+            "by_topic": by_topic,
             "last_collect": last["value"] if last else None,
             "summarized": summarized,
             "unsummarized": unsummarized,
@@ -219,6 +233,12 @@ class Handler(BaseHTTPRequestHandler):
             where.append("i.tier = ?"); params.append(one("tier"))
         if one("source"):
             where.append("i.source_key = ?"); params.append(one("source"))
+        if one("topic"):
+            cats = TOPIC_CATEGORIES.get(one("topic"))
+            if cats is None:
+                raise ValueError(f"unknown topic: {one('topic')}")
+            where.append(f"i.category IN ({','.join('?' * len(cats))})")
+            params.extend(cats)
         if one("min_score"):
             where.append("i.score >= ?"); params.append(int(one("min_score")))
         if one("tag"):

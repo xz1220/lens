@@ -66,12 +66,22 @@ const STATUS = [
 const STATUS_LABEL = Object.fromEntries(STATUS.map((s) => [s.v, s.label]));
 const SORT_LABEL = { smart: '精选在上', date: '最新在上', score: '高分在上', fetched: '新抓在上' };
 
+// 主题 tab（按「阅读姿势」聚合 category，key 与 server 的 TOPIC_CATEGORIES 对齐）
+const TOPICS = [
+  { v: '', label: '全部' },
+  { v: 'official', label: '官方动态' },
+  { v: 'research', label: '学术研究' },
+  { v: 'experts', label: '专家观点' },
+  { v: 'oss', label: '开源工程' },
+  { v: 'market', label: '市场信号' },
+];
+
 const ICON = {
   search: '<svg class="ic" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.4"/><line x1="10.8" y1="10.8" x2="15" y2="15" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
 };
 
 // ---------------- 状态 ----------------
-const filters = { status: '', tier: '', source: '', min_score: '', q: '', sort: 'smart' };
+const filters = { status: '', tier: '', source: '', min_score: '', q: '', sort: 'smart', topic: '' };
 let statsCache = { total: 0, by_status: {}, by_tier: {}, last_collect: null };
 let sourcesMap = {};      // source_key -> {name, desc, tier, ...}，用于来源说明
 let itemsCache = [];
@@ -113,6 +123,7 @@ async function loadStats() {
   statsCache = await api('/api/stats');
   renderStats();
   updateRailCounts();
+  updateTopicCounts();
 }
 
 // 写操作成功后刷新看板（统计 + 列表）。这是次级刷新：即便失败也只提示、
@@ -268,12 +279,37 @@ function buildListShell() {
     el('span', { class: 'list-count', id: 'list-count' }),
     el('span', { class: 'list-sort', id: 'list-sort' }),
   );
-  listEl.append(head, el('div', { class: 'list-scroll', id: 'list-scroll' }));
+  // 主题 tab：主要浏览维度，常驻信息流顶部
+  const tabs = el('div', { class: 'topic-tabs', id: 'topic-tabs' });
+  for (const t of TOPICS) {
+    tabs.append(el('button', {
+      class: 'ttab' + (filters.topic === t.v ? ' on' : ''),
+      'data-topic': t.v, type: 'button',
+      onclick: () => { filters.topic = t.v; syncTopicTabs(); loadItems(); },
+    },
+      t.label,
+      el('span', { class: 'num', 'data-topic-count': t.v || '__total' }),
+    ));
+  }
+  listEl.append(head, tabs, el('div', { class: 'list-scroll', id: 'list-scroll' }));
+}
+
+function syncTopicTabs() {
+  document.querySelectorAll('#topic-tabs .ttab').forEach((b) =>
+    b.classList.toggle('on', b.dataset.topic === filters.topic));
+}
+
+function updateTopicCounts() {
+  const bt = statsCache.by_topic || {};
+  document.querySelectorAll('#topic-tabs .ttab .num').forEach((n) => {
+    const key = n.dataset.topicCount;
+    n.textContent = numfmt(key === '__total' ? statsCache.total : (bt[key] || 0));
+  });
 }
 
 function queryString() {
   const p = new URLSearchParams();
-  for (const k of ['status', 'tier', 'source', 'min_score', 'q', 'sort']) {
+  for (const k of ['status', 'tier', 'source', 'min_score', 'q', 'sort', 'topic']) {
     if (filters[k]) p.set(k, filters[k]);
   }
   return p.toString();
