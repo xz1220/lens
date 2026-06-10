@@ -22,8 +22,8 @@ python3 summarize.py      # LLM 中文总结：抓原文 → 摘要/要点/为�
 python3 server.py         # 起本地看板：http://127.0.0.1:8787
 ```
 
-依赖：Python 3.10+ 和 PyYAML，其余全是标准库；总结引擎用本机 `claude` CLI
-（Claude Code 的无头模式），不需要配 API key。
+依赖：Python 3.10+ 和 PyYAML，其余全是标准库；总结引擎用本机 CLI 的无头模式
+（默认 `codex exec`，`--engine claude` 备选），不需要配 API key。
 
 ## 结构
 
@@ -31,7 +31,7 @@ python3 server.py         # 起本地看板：http://127.0.0.1:8787
 sources.yml      31 个信息源 + 接入方式 + 实测状态（源真相）
 schema.sql       SQLite 表结构
 collect.py       采集器：一个 adapter 一种源形态，只增不覆盖你的 triage
-summarize.py     AI 总结：抓原文正文 + claude 无头批量产出中文摘要，只写 ai_* 字段
+summarize.py     AI 总结：抓原文正文 + codex/claude 无头批量产出中文摘要，只写 ai_* 字段
 server.py        本地看板 + 全部读写接口（标准库 http）
 web/             前端（墨色冷调三栏看板：feed 中文摘要行 + 详情 AI 整理区）
 templates/       讨论 prompt 模板

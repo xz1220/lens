@@ -35,10 +35,14 @@
 用户预验收结论：feed 扫不出内容、点开没东西可读 —— 根因是采集回来的是「生肉」
 （英文标题 + 原始片段/空摘要），缺一个「助手帮你整理」的环节。定下：
 
-- **D8 总结引擎 = 本机 `claude` CLI 无头模式（`claude -p --output-format json`）。**
-  - 为什么：零新依赖、零 API key 管理（复用 Claude Code 登录态）、外层 JSON 自带成本核算。
-  - 默认 haiku（实测 ~$0.0075/条，质量够分诊用），`--model sonnet` 可换。
-  - 备选：直连 Anthropic API（弃，要管 key）；本地小模型（弃，质量不稳）。
+- **D8 总结引擎 = 本机 CLI 无头模式，默认 `codex exec`（用户拍板），`--engine claude` 备选。**
+  - 为什么 CLI 无头：零新依赖、零 API key 管理（复用已登录的订阅态）。
+  - 为什么 codex 默认：用户指定；且实测 `claude -p` 在长批量运行中会间歇把总结请求
+    当闲聊拒答（is_error=false 但回「I'm here to help with software engineering…」），
+    1320/2477 后全军覆没；codex exec（`-o` 输出文件 + stdin prompt + read-only 沙箱）
+    JSON 直出且订阅制零边际成本。
+  - claude 引擎保留作备选（默认 haiku，~$0.0075/条）。
+  - 备选：直连 API（弃，要管 key）；本地小模型（弃，质量不稳）。
 - **D9 总结落 DB 而非 markdown。** `ai_summary`（一句话中文）/ `ai_detail`（JSON 要点 +
   为什么值得看）/ `content_text`（抓取的正文，也是 LLM 的输入材料）。它们是 item 的
   「视图增强」，要随列表过滤排序，所以进 DB；和 D2「讨论/灵感用 markdown」不冲突。

@@ -9,8 +9,9 @@
   content_text 抓取的原文正文（LLM 的输入材料，也是详情页的可读原文）
 
 设计原则（与 collect.py 一致）
-- 零新依赖：LLM 走本机 `claude` CLI 无头模式（claude -p --output-format json），
-  正文抓取用标准库。没有 API key 管理。
+- 零新依赖：LLM 走本机 CLI 无头模式——默认 `codex exec`（用户指定；claude -p
+  会间歇把总结请求当闲聊拒答），`--engine claude` 备选。正文抓取用标准库。
+  没有 API key 管理。
 - 忠实不脑补：prompt 硬性要求只基于给定材料；材料只有标题时摘要末尾标注
   「（仅标题）」。抓不到正文就降级用 collect 存的原始摘要。
 - 绝不碰 triage：只 UPDATE ai_* / content_text 字段，score/tags/status/comment
@@ -24,7 +25,8 @@
   python3 summarize.py --all           # 不设上限（按批跑完为止）
   python3 summarize.py --limit 30
   python3 summarize.py --source arxiv  # 只总结一个源
-  python3 summarize.py --model sonnet  # 换模型（默认 haiku，快且够用）
+  python3 summarize.py --engine claude # 换回 claude 引擎（默认 codex）
+  python3 summarize.py --model gpt-5.3 # 模型覆盖（默认用引擎 CLI 自身配置）
   python3 summarize.py --no-fetch      # 不抓原文，只用已有 title/summary
   python3 summarize.py --dry-run       # 看会选中哪些条 + 第一批 prompt，不调 LLM
 """
@@ -34,6 +36,7 @@ import argparse
 import html
 import ipaddress
 import json
+import os
 import re
 import socket
 import sqlite3
@@ -46,8 +49,10 @@ from urllib.parse import urlsplit
 
 from collect import DB_PATH, fetch, load_sources, now_iso
 
+CODEX_BIN = "codex"
 CLAUDE_BIN = "claude"
-DEFAULT_MODEL = "haiku"          # 总结量大，haiku 快且便宜；--model sonnet 可换
+DEFAULT_ENGINE = "codex"         # 用户指定：总结走 Codex CLI（claude -p 会间歇拒答总结任务）
+CLAUDE_DEFAULT_MODEL = "haiku"   # claude 引擎的默认模型；codex 用其 CLI 自身默认
 DEFAULT_LIMIT = 120
 DEFAULT_BATCH = 8                # 一次 LLM 调用总结几条
 LLM_WORKERS = 4                  # 并发跑几个 claude -p（批与批之间并行）
@@ -301,9 +306,50 @@ def parse_llm_reply(text: str, expected: set[str]) -> dict[str, dict]:
 
 
 # --------------------------------------------------------------------------- #
-# LLM runner — claude CLI 无头模式
+# LLM runner — 双引擎：codex exec（默认）/ claude -p（备选）
 # --------------------------------------------------------------------------- #
-def run_claude(prompt: str, model: str | None = DEFAULT_MODEL,
+def run_codex(prompt: str, model: str | None = None,
+              timeout: int = LLM_TIMEOUT) -> tuple[str, float]:
+    """跑一次 codex exec 无头模式，返回 (回复文本, 成本)。
+
+    prompt 走 stdin（`-`）；最终回复经 --output-last-message 文件拿（stdout 混
+    着进度日志，不可直接解析）。-s read-only 防它动文件；cwd 设临时目录 +
+    --skip-git-repo-check 避免把 lens 仓库当工作上下文。codex 是订阅制、
+    CLI 不报美元成本，成本恒记 0。
+    """
+    fd, out_path = tempfile.mkstemp(prefix="lens-codex-", suffix=".txt")
+    os.close(fd)
+    cmd = [CODEX_BIN, "exec", "--skip-git-repo-check", "-s", "read-only",
+           "-o", out_path, "-"]
+    if model:
+        cmd += ["-m", model]
+    try:
+        try:
+            proc = subprocess.run(cmd, input=prompt.encode("utf-8"),
+                                  capture_output=True, timeout=timeout,
+                                  cwd=tempfile.gettempdir())
+        except FileNotFoundError:
+            sys.exit("找不到 `codex` CLI — 安装/登录 OpenAI Codex，或改用 --engine claude。")
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"codex exec 超时（>{timeout}s）")
+        if proc.returncode != 0:
+            tail = proc.stderr.decode("utf-8", "replace").strip()[-400:]
+            raise RuntimeError(f"codex exec 退出码 {proc.returncode}: {tail}")
+        try:
+            text = open(out_path, encoding="utf-8").read().strip()
+        except OSError:
+            text = ""
+        if not text:
+            raise RuntimeError("codex exec 没有产出回复")
+        return text, 0.0
+    finally:
+        try:
+            os.unlink(out_path)
+        except OSError:
+            pass
+
+
+def run_claude(prompt: str, model: str | None = CLAUDE_DEFAULT_MODEL,
                timeout: int = LLM_TIMEOUT) -> tuple[str, float]:
     """跑一次 claude -p，返回 (回复文本, 本次成本 USD)。
 
@@ -422,7 +468,14 @@ def apply_results(conn: sqlite3.Connection, batch: list[dict],
 # run
 # --------------------------------------------------------------------------- #
 def run(limit, source, model, batch_size, no_fetch, dry_run,
-        workers: int = LLM_WORKERS) -> None:
+        workers: int = LLM_WORKERS, engine: str = DEFAULT_ENGINE) -> None:
+    if engine == "claude":
+        model = model or CLAUDE_DEFAULT_MODEL
+        base_runner = lambda p: run_claude(p, model=model)
+    else:
+        base_runner = lambda p: run_codex(p, model=model)
+    engine_label = f"{engine}:{model}" if model else engine
+
     conn = connect()
     added = ensure_ai_columns(conn)
     if added:
@@ -433,7 +486,7 @@ def run(limit, source, model, batch_size, no_fetch, dry_run,
     if not rows:
         print("  没有待总结的 item（已全部总结，或都被 ignore 了）。")
         return
-    print(f"  待总结 {len(rows)} 条（模型 {model}，每批 {batch_size} 条）")
+    print(f"  待总结 {len(rows)} 条（引擎 {engine_label}，每批 {batch_size} 条）")
 
     items = [dict(r) for r in rows]
 
@@ -466,8 +519,8 @@ def run(limit, source, model, batch_size, no_fetch, dry_run,
         print(build_prompt(batches[0])[:2000])
         return
 
-    # 3) 并发总结（批与批并行调 claude），落库串行在主线程做
-    runner = FuseRunner(lambda p: run_claude(p, model=model))
+    # 3) 并发总结（批与批并行调引擎），落库串行在主线程做
+    runner = FuseRunner(base_runner)
     done, total_cost, finished = 0, 0.0, 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futs = {pool.submit(summarize_batch, b, runner): b for b in batches}
@@ -476,11 +529,11 @@ def run(limit, source, model, batch_size, no_fetch, dry_run,
             results, cost = fut.result()
             total_cost += cost
             finished += 1
-            done += apply_results(conn, batch, results, model)
+            done += apply_results(conn, batch, results, engine_label)
             print(f"  ✓ 批 {finished}/{len(batches)}  本批 {len(results)}/{len(batch)} 条"
                   f"  · 累计 {done} 条 · ${total_cost:.2f}")
     if runner.blown:
-        print("  ⚠ LLM 连续失败已熔断（疑似 claude 未登录 / 配额耗尽 / 模型名错误），"
+        print(f"  ⚠ LLM 连续失败已熔断（疑似 {engine} 未登录 / 配额耗尽 / 模型名错误），"
               "剩余批次未真正调用。修好后重跑即可，未总结条目会被重新选中。")
 
     remain_sql = "SELECT COUNT(*) FROM items WHERE ai_summarized_at IS NULL AND status != 'ignored'"
@@ -500,7 +553,10 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help=f"本次最多总结几条（默认 {DEFAULT_LIMIT}）")
     ap.add_argument("--all", action="store_true", help="不设上限，全部未总结的都跑")
     ap.add_argument("--source", help="只总结一个源（sources.yml 的 key）")
-    ap.add_argument("--model", default=DEFAULT_MODEL, help=f"claude CLI 模型别名（默认 {DEFAULT_MODEL}）")
+    ap.add_argument("--engine", choices=["codex", "claude"], default=DEFAULT_ENGINE,
+                    help=f"总结引擎 CLI（默认 {DEFAULT_ENGINE}）")
+    ap.add_argument("--model", default=None,
+                    help=f"模型覆盖：codex 默认用其 CLI 配置；claude 默认 {CLAUDE_DEFAULT_MODEL}")
     ap.add_argument("--batch", type=int, default=DEFAULT_BATCH, help=f"每次 LLM 调用总结几条（默认 {DEFAULT_BATCH}）")
     ap.add_argument("--workers", type=int, default=LLM_WORKERS,
                     help=f"并发 claude 调用数（默认 {LLM_WORKERS}）")
@@ -513,7 +569,7 @@ def main() -> None:
     run(limit=None if args.all else args.limit, source=args.source,
         model=args.model, batch_size=max(1, args.batch),
         no_fetch=args.no_fetch, dry_run=args.dry_run,
-        workers=max(1, args.workers))
+        workers=max(1, args.workers), engine=args.engine)
 
 
 if __name__ == "__main__":

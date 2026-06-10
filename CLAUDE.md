@@ -31,7 +31,8 @@ python3 server.py             # 起本地看板 http://127.0.0.1:8787
 日常一条龙：`python3 collect.py && python3 summarize.py`，然后开看板。
 
 零额外依赖，只用到 PyYAML（和 life-os 一致）+ Python 标准库；`summarize.py` 的 LLM
-引擎走本机 `claude` CLI 无头模式（`claude -p`，默认 haiku 模型），不需要管理 API key。
+引擎走本机 CLI 无头模式——**默认 `codex exec`**（用户指定；实测 `claude -p` 会间歇把
+总结请求当闲聊拒答），`--engine claude` 备选（默认 haiku）。不需要管理 API key。
 
 ## 架构（三层，别混）
 
@@ -42,8 +43,8 @@ python3 server.py             # 起本地看板 http://127.0.0.1:8787
   `data/ideas/*.md` + `inbox.md`（灵感）。**讨论和灵感故意用 markdown 不进 DB**，方便人读、git 友好。
 
 后端：`collect.py`（采集，一个 adapter 一种源形态）+ `summarize.py`（AI 总结：抓正文 →
-批量调 `claude -p` 产出 `ai_summary`/`ai_detail`/`content_text` → UPDATE 回填）+
-`server.py`（标准库 http 看板 + 全部写接口）。
+批量调 `codex exec`（默认）/ `claude -p` 产出 `ai_summary`/`ai_detail`/`content_text` →
+UPDATE 回填）+ `server.py`（标准库 http 看板 + 全部写接口）。
 前端：`web/`（墨色冷调 v3.1 三栏看板：feed 卡片有中文摘要行，详情页是 AI 整理区
 「AI 摘要 → 要点 → 为什么值得看 → 原文材料折叠」）。
 
@@ -70,9 +71,11 @@ python3 server.py             # 起本地看板 http://127.0.0.1:8787
 
 ✅ 2026-06-10 验收整改（用户验收发现 feed 不可扫、详情不可读）：
 - 新增 `summarize.py`：选未总结 item（tier 权重 + 时间，排除 ignored 和 digest:false 源）→
-  8 线程并发抓原文正文（stdlib 提取，失败降级原始摘要）→ 批量（8 条/批，4 路并发）调
-  `claude -p` 产出中文 `ai_summary` + `ai_detail`(JSON points/why) → UPDATE 落库。
-  批失败重试一次再二分降级到单条；每批 commit，中断安全。成本约 $0.0075/条（haiku）。
+  8 线程并发抓原文正文（stdlib 提取 + SSRF 公网闸，失败降级原始摘要）→ 批量（8 条/批，
+  4 路并发）调 LLM CLI 产出中文 `ai_summary` + `ai_detail`(JSON points/why) → UPDATE 落库。
+  引擎默认 `codex exec`（用户指定；claude -p 实测会间歇拒答总结任务），`--engine claude` 备选。
+  hex 标识防 LLM 编号错位；批失败重试一次再二分降级到单条 + 连续失败熔断；每批 commit，
+  中断安全。claude/haiku 成本约 $0.0075/条，codex 订阅制零边际成本。
 - 降噪：`keyword_filter`（vercel-changelog / hn-algolia 配 `filter_keywords`），
   HF 模型卡跨段 `<style>` CSS 垃圾修复；存量噪声已备份后清理（vercel 873 + hn 72 条）。
 - 看板：feed 卡片中文摘要行、详情页 AI 整理区、顶栏总结进度、搜索覆盖 ai_summary。

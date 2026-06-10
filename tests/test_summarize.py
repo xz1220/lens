@@ -497,6 +497,72 @@ class TestCliGuards(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     summarize.main()
 
+    def test_unknown_engine_rejected(self):
+        import contextlib, io
+        from unittest import mock
+        with mock.patch.object(sys, "argv", ["summarize.py", "--engine", "gemini"]):
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    summarize.main()
+
+
+# --------------------------------------------------------------------------- #
+# codex 引擎 runner（mock subprocess，零真实调用）
+# --------------------------------------------------------------------------- #
+class TestRunCodex(unittest.TestCase):
+    def _fake_proc(self, returncode=0, stderr=b""):
+        from types import SimpleNamespace
+        return SimpleNamespace(returncode=returncode, stdout=b"", stderr=stderr)
+
+    def test_reads_reply_from_output_file(self):
+        from unittest import mock
+        from pathlib import Path
+
+        def fake_run(cmd, **kw):
+            # codex 把最终回复写到 -o 指定的文件；stdout 是进度日志（不读）
+            out = cmd[cmd.index("-o") + 1]
+            Path(out).write_text('[{"id":"x","summary":"好"}]', encoding="utf-8")
+            self.assertIn("--skip-git-repo-check", cmd)
+            self.assertIn("read-only", cmd)
+            self.assertEqual(cmd[-1], "-")  # prompt 走 stdin
+            return self._fake_proc()
+
+        with mock.patch.object(summarize.subprocess, "run", fake_run):
+            text, cost = summarize.run_codex("prompt")
+        self.assertEqual(text, '[{"id":"x","summary":"好"}]')
+        self.assertEqual(cost, 0.0)
+
+    def test_model_flag_passed_through(self):
+        from unittest import mock
+        from pathlib import Path
+        seen = {}
+
+        def fake_run(cmd, **kw):
+            seen["cmd"] = cmd
+            Path(cmd[cmd.index("-o") + 1]).write_text("ok", encoding="utf-8")
+            return self._fake_proc()
+
+        with mock.patch.object(summarize.subprocess, "run", fake_run):
+            summarize.run_codex("p", model="gpt-5.3")
+        self.assertIn("-m", seen["cmd"])
+        self.assertIn("gpt-5.3", seen["cmd"])
+
+    def test_nonzero_exit_and_empty_output_raise(self):
+        from unittest import mock
+        from pathlib import Path
+        with mock.patch.object(summarize.subprocess, "run",
+                               lambda *a, **k: self._fake_proc(returncode=2, stderr=b"auth required")):
+            with self.assertRaises(RuntimeError):
+                summarize.run_codex("p")
+
+        def fake_run_empty(cmd, **kw):
+            Path(cmd[cmd.index("-o") + 1]).write_text("", encoding="utf-8")
+            return self._fake_proc()
+
+        with mock.patch.object(summarize.subprocess, "run", fake_run_empty):
+            with self.assertRaises(RuntimeError):
+                summarize.run_codex("p")
+
 
 if __name__ == "__main__":
     unittest.main()
