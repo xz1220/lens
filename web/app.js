@@ -64,14 +64,14 @@ const STATUS = [
   { v: 'ignored',  label: '忽略' },
 ];
 const STATUS_LABEL = Object.fromEntries(STATUS.map((s) => [s.v, s.label]));
-const SORT_LABEL = { date: '最新在上', score: '高分在上', fetched: '新抓在上' };
+const SORT_LABEL = { smart: '精选在上', date: '最新在上', score: '高分在上', fetched: '新抓在上' };
 
 const ICON = {
   search: '<svg class="ic" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.4"/><line x1="10.8" y1="10.8" x2="15" y2="15" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
 };
 
 // ---------------- 状态 ----------------
-const filters = { status: '', tier: '', source: '', min_score: '', q: '', sort: 'date' };
+const filters = { status: '', tier: '', source: '', min_score: '', q: '', sort: 'smart' };
 let statsCache = { total: 0, by_status: {}, by_tier: {}, last_collect: null };
 let sourcesMap = {};      // source_key -> {name, desc, tier, ...}，用于来源说明
 let itemsCache = [];
@@ -100,6 +100,12 @@ function renderStats() {
     seg('忽略', bs.ignored || 0),
     `抓取 <b class="num">${dStamp(s.last_collect)}</b>`,
   ];
+  // AI 摘要进度：还有待总结的就提示（跑 summarize.py），全总结完只报数
+  if (s.summarized != null) {
+    parts.push(s.unsummarized
+      ? `AI摘要 <b class="num">${numfmt(s.summarized)}</b> · 待 <b class="num">${numfmt(s.unsummarized)}</b>`
+      : `AI摘要 <b class="num">${numfmt(s.summarized)}</b>`);
+  }
   $('#stats').innerHTML = parts.join('<span class="sep">·</span>');
 }
 
@@ -123,7 +129,7 @@ function buildRail() {
   // 搜索
   const search = el('div', { class: 'search' });
   search.innerHTML = ICON.search;
-  const q = el('input', { type: 'search', id: 'q', placeholder: '搜索标题 / 摘要', autocomplete: 'off' });
+  const q = el('input', { type: 'search', id: 'q', placeholder: '搜标题 / 摘要 / AI 摘要', autocomplete: 'off' });
   let qTimer;
   q.addEventListener('input', () => {
     clearTimeout(qTimer);
@@ -172,9 +178,10 @@ function buildRail() {
     (v) => { filters.min_score = v; syncRail(); loadItems(); },
   )));
 
-  // 排序
+  // 排序（精选 = 官方/专家优先再按时间，热度滚动源不再霸占顶部）
   railEl.append(fgroup('排序', chipRow(
-    [{ v: 'date', label: '最新' }, { v: 'score', label: '评分' }, { v: 'fetched', label: '抓取' }],
+    [{ v: 'smart', label: '精选' }, { v: 'date', label: '最新' },
+     { v: 'score', label: '评分' }, { v: 'fetched', label: '抓取' }],
     () => filters.sort,
     (v) => { filters.sort = v; syncRail(); loadItems(); },
   )));
@@ -210,7 +217,7 @@ function syncRail() {
     if (row.dataset.chiprow === 'tier') return;
     row.querySelectorAll('.chip').forEach((c) => {
       const v = c.dataset.v;
-      if (['date', 'score', 'fetched'].includes(v)) c.classList.toggle('on', v === filters.sort);
+      if (['smart', 'date', 'score', 'fetched'].includes(v)) c.classList.toggle('on', v === filters.sort);
       else c.classList.toggle('on', v === filters.min_score);
     });
   });
@@ -340,6 +347,13 @@ function rowEl(it, i) {
 
   const title = el('div', { class: 'row-title', text: it.title || '(无标题)' });
 
+  // 中文摘要行：让 feed 一眼可扫。没跑过 AI 总结时退回原始摘要（淡显）。
+  const digest = (it.ai_summary || '').trim();
+  const sumText = digest || (it.summary || '').trim();
+  const sumLine = sumText
+    ? el('div', { class: 'row-sum' + (digest ? '' : ' raw'), text: sumText })
+    : null;
+
   const bot = el('div', { class: 'row-bot' });
   if (it.score != null) {
     bot.append(el('span', { class: 'score-tag' },
@@ -354,6 +368,7 @@ function rowEl(it, i) {
   }
 
   row.append(top, title);
+  if (sumLine) row.append(sumLine);
   if (bot.children.length) row.append(bot);
   return row;
 }
@@ -380,6 +395,16 @@ function selectItem(it, idx) {
   highlightRow();
   const rowNode = $(`#list-scroll .row[data-id="${it.id}"]`);
   if (rowNode) rowNode.scrollIntoView({ block: 'nearest' });
+  loadItemContent(it);
+}
+
+// 列表接口为瘦身不带 content_text；选中后异步取单条全文，回来时仍选中才填充
+async function loadItemContent(it) {
+  if (!it.has_content || it.content_text != null) return;
+  let full;
+  try { full = await api(`/api/items/${it.id}`); } catch { return; }
+  it.content_text = full.content_text || '';
+  if (current && current.id === it.id) renderDetail();
 }
 
 function deselect() {
@@ -407,17 +432,59 @@ function renderDetail() {
 
   const title = el('h1', { class: 'detail-title', text: it.title || '(无标题)' });
 
-  // 标题之下就是这一条的「描述」（清晰、不缩小）
-  const descLabel = el('div', { class: 'detail-label', text: '描述' });
-  const summary = it.summary
-    ? el('div', { class: 'summary', text: it.summary })
-    : el('div', { class: 'summary faint', text: '（这条没有摘要，打开原文看全文。）' });
+  // 标题之下是「AI 整理区」：一句话摘要 → 要点 → 为什么值得看。
+  // 没总结过的条目退回原始摘要 + 明确的「怎么补上」提示。
+  const digest = el('div', { class: 'digest' });
+  if ((it.ai_summary || '').trim()) {
+    digest.append(
+      el('div', { class: 'detail-label', text: 'AI 摘要' }),
+      el('div', { class: 'ai-summary', text: it.ai_summary }),
+    );
+    const d = parseAiDetail(it.ai_detail);
+    if (d.points.length) {
+      const ul = el('ul', { class: 'ai-points' });
+      for (const p of d.points) ul.append(el('li', { text: p }));
+      digest.append(ul);
+    }
+    if (d.why) {
+      digest.append(el('div', { class: 'ai-why' },
+        el('span', { class: 'ai-why-label', text: '为什么值得看 · ' }), d.why));
+    }
+    digest.append(el('div', { class: 'ai-meta', text:
+      `${it.ai_model || 'AI'} 总结于 ${dDate(it.ai_summarized_at) || '—'} · 仅基于原文材料，存疑请开原文` }));
+  } else {
+    digest.append(el('div', { class: 'detail-label', text: '描述' }));
+    digest.append(it.summary
+      ? el('div', { class: 'summary', text: it.summary })
+      : el('div', { class: 'summary faint', text: '（这条没有摘要，打开原文看全文。）' }));
+    // digest:false 的源（如 SEC 全量申报流水）永远不进总结队列——
+    // 提示「去跑 summarize.py」是个永远不会兑现的承诺，得说实话。
+    const noDigest = (sourcesMap[it.source_key] || {}).digest === false;
+    digest.append(el('div', { class: 'ai-pending', text: noDigest
+      ? '该源是低密度滚动流水，不做 AI 总结 — 看标题不够就直接开原文。'
+      : '还没跑 AI 总结 — 终端执行 python3 summarize.py 生成中文摘要和要点。' }));
+  }
 
-  // 来源说明降级为「描述」之后的小注：它讲的是这个源，不是这一条
+  // 原文材料（抓取的正文 / 原始摘要）折叠收起，想核对时再展开
+  const mats = [];
+  if ((it.ai_summary || '').trim() && (it.summary || '').trim()) {
+    mats.push(el('div', { class: 'mat-sum', text: it.summary }));
+  }
+  if ((it.content_text || '').trim()) {
+    mats.push(el('div', { class: 'mat-body', text: it.content_text.slice(0, 4000) }));
+  }
+  const matBox = mats.length
+    ? el('details', { class: 'mat' },
+        el('summary', {}, `原文材料${it.content_text ? '（抓取的正文节选）' : '（采集时的原始摘要）'}`),
+        ...mats)
+    : null;
+
+  // 来源说明小注：它讲的是这个源，不是这一条
   const srcDescLine = srcDesc
     ? el('div', { class: 'src-desc-line', text: '来源 · ' + srcDesc })
     : null;
-  detailEl.append(head, title, descLabel, summary,
+  detailEl.append(head, title, digest,
+    ...(matBox ? [matBox] : []),
     ...(srcDescLine ? [srcDescLine] : []),
     triageBlock(), el('hr', { class: 'rule' }),
     discussionBlock(), el('hr', { class: 'rule' }), ideaBlock());
@@ -429,6 +496,17 @@ function renderDetail() {
   renderThreadChips();
   if (discussion) renderDiscussBox();
   renderRecentIdeas();
+}
+
+// ai_detail 是 summarize.py 存的 JSON {"points":[...],"why":"..."}；坏数据一律降级为空
+function parseAiDetail(raw) {
+  try {
+    const d = JSON.parse(raw || '{}');
+    return {
+      points: Array.isArray(d.points) ? d.points.filter((p) => typeof p === 'string' && p.trim()) : [],
+      why: typeof d.why === 'string' ? d.why.trim() : '',
+    };
+  } catch { return { points: [], why: '' }; }
 }
 
 function emptyState() {
@@ -633,7 +711,10 @@ async function genDiscussion() {
   // current 仍在（未被筛掉）才同步整行并刷新 chip；否则它已是 null，不能再访问
   if (current) {
     const fresh = itemsCache.find((x) => x.id === curId);
-    if (fresh) current = fresh;
+    if (fresh) {
+      fresh.content_text = current.content_text; // 列表行不带原文，别把已懒加载的丢了
+      current = fresh;
+    }
     renderThreadChips();
   }
 }

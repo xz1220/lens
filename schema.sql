@@ -19,7 +19,15 @@ CREATE TABLE IF NOT EXISTS items (
   tags          TEXT,                             -- comma-separated, lowercased
   status        TEXT NOT NULL DEFAULT 'captured', -- captured | reviewed | promoted | ignored
   comment       TEXT,                             -- your note on the item itself
-  triaged_at    TEXT                              -- last time you touched score/tags/status/comment
+  triaged_at    TEXT,                             -- last time you touched score/tags/status/comment
+
+  -- AI digest fields, written ONLY by summarize.py (never by collect.py, never
+  -- touching the triage fields above). 旧库由 summarize.py 启动时 ALTER 迁移。 --
+  ai_summary       TEXT,                          -- 一句话中文摘要（feed 卡片直接可扫）
+  ai_detail        TEXT,                          -- JSON {"points":[...],"why":"..."}（详情页整理区）
+  content_text     TEXT,                          -- 抓取的原文正文（LLM 输入材料，详情页可读）
+  ai_model         TEXT,                          -- 产出摘要的模型
+  ai_summarized_at TEXT                           -- ISO8601，何时总结的
 );
 
 CREATE INDEX IF NOT EXISTS idx_items_status     ON items(status);

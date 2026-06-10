@@ -1438,5 +1438,99 @@ class TestWiringLoop4(unittest.TestCase):
                 self.assertIn(s.get("status"), ("needs_token", "needs_headless", "blocked"))
 
 
+# --------------------------------------------------------------------------- #
+# keyword_filter: 混源降噪（vercel-changelog 等）的通用过滤器
+# --------------------------------------------------------------------------- #
+class TestKeywordFilter(unittest.TestCase):
+    def test_no_keywords_passthrough(self):
+        recs = [{"title": "anything", "summary": ""}]
+        self.assertEqual(collect.keyword_filter(recs, None), recs)
+        self.assertEqual(collect.keyword_filter(recs, []), recs)
+
+    def test_word_boundary_no_substring_false_positive(self):
+        # 'ai' 不许命中 maintain / available / domains 这类包含子串的词。
+        recs = [
+            {"title": "Improved domain maintain flow", "summary": "now available"},
+            {"title": "AI Gateway adds new models", "summary": ""},
+            {"title": "deploy hooks", "summary": "Use the AI SDK to stream"},
+        ]
+        out = collect.keyword_filter(recs, ["ai"])
+        self.assertEqual([r["title"] for r in out],
+                         ["AI Gateway adds new models", "deploy hooks"])
+
+    def test_case_insensitive_and_summary_matched(self):
+        recs = [{"title": "weekly digest", "summary": "Claude Sonnet now in gateway"}]
+        self.assertEqual(len(collect.keyword_filter(recs, ["claude"])), 1)
+
+    def test_alnum_keyword_boundaries(self):
+        # 'v0' 命中独立 token，不命中 v01 / dev0。
+        recs = [
+            {"title": "v0 ships composer", "summary": ""},
+            {"title": "v01 internal build", "summary": ""},
+            {"title": "dev0 branch", "summary": ""},
+        ]
+        out = collect.keyword_filter(recs, ["v0"])
+        self.assertEqual([r["title"] for r in out], ["v0 ships composer"])
+
+    def test_vercel_source_carries_filter_keywords(self):
+        src = next(s for s in collect.load_sources() if s["key"] == "vercel-changelog")
+        self.assertTrue(src.get("filter_keywords"))  # 配置真的接上了
+        self.assertIn("ai", [str(k).lower() for k in src["filter_keywords"]])
+
+
+class TestRunAppliesKeywordFilter(DbTestCase):
+    def test_run_drops_non_matching_records(self):
+        collect.ADAPTERS["fake_mixed"] = lambda src: [
+            {"title": "AI Gateway update", "url": "https://x/ai"},
+            {"title": "CDN cache change", "url": "https://x/cdn"},
+        ]
+        self.addCleanup(lambda: collect.ADAPTERS.pop("fake_mixed", None))
+        orig = collect.load_sources
+        collect.load_sources = lambda: [{
+            "key": "mixed", "name": "Mixed", "tier": "P0", "status": "ok",
+            "adapter": "fake_mixed", "filter_keywords": ["ai"],
+        }]
+        self.addCleanup(lambda: setattr(collect, "load_sources", orig))
+        with contextlib.redirect_stdout(io.StringIO()):
+            collect.run(only=None, dry_run=False)
+        conn = collect.connect()
+        self.addCleanup(conn.close)
+        titles = [r[0] for r in conn.execute("SELECT title FROM items").fetchall()]
+        self.assertEqual(titles, ["AI Gateway update"])
+
+
+# --------------------------------------------------------------------------- #
+# HF 模型卡：lede 前的 <style>/<script> 块（跨空行）不许变成假描述
+# --------------------------------------------------------------------------- #
+class TestHfProseStripsEmbeddedCss(unittest.TestCase):
+    NVIDIA_LIKE = (
+        "<style>\n"
+        "h1, h2, h3, h4, h5, h6 {\n"
+        "  color: #76b900; /* NVIDIA green */\n"
+        "  font-weight: 700;\n"
+        "}\n"
+        "</style>\n\n"
+        "A streaming ASR model for low-latency transcription on edge devices.\n"
+    )
+
+    def test_first_prose_skips_style_block(self):
+        out = collect._hf_first_prose(self.NVIDIA_LIKE)
+        self.assertIn("streaming ASR model", out)
+        self.assertNotIn("color", out)
+        self.assertNotIn("76b900", out)
+
+    def test_summarize_hf_card_has_no_css_text(self):
+        meta = {"pipeline_tag": "automatic-speech-recognition", "downloads": 10, "likes": 2}
+        out = collect.summarize_hf_card(self.NVIDIA_LIKE, meta)
+        self.assertIn("语音识别", out)
+        self.assertNotIn("color", out)
+
+    def test_style_only_readme_falls_back_to_metadata(self):
+        css_only = "<style>\nh1 { color: red; }\n</style>\n"
+        meta = {"pipeline_tag": "text-generation", "downloads": 5, "likes": 1}
+        out = collect.summarize_hf_card(css_only, meta)
+        self.assertEqual(out, collect._hf_meta_summary(meta))  # 诚实降级，不出 CSS
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

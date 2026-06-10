@@ -134,6 +134,27 @@ def item_id(source_key: str, url: str) -> str:
     return hashlib.sha1(f"{source_key}\n{url}".encode("utf-8")).hexdigest()
 
 
+def keyword_filter(records: list[dict], keywords) -> list[dict]:
+    """sources.yml 可选 `filter_keywords`：标题/摘要命中任意关键词才保留。
+
+    给混源降噪用（vercel-changelog 大部分是非 AI 的平台消息）。匹配按
+    词边界（字母数字断开），所以 keyword 'ai' 不会误命中 maintain/available；
+    没配 filter_keywords 的源原样通过。
+    """
+    if not keywords:
+        return records
+    pats = [
+        re.compile(rf"(?i)(?<![a-z0-9]){re.escape(str(k).lower())}(?![a-z0-9])")
+        for k in keywords if str(k).strip()
+    ]
+    out = []
+    for rec in records:
+        hay = f"{rec.get('title') or ''} {rec.get('summary') or ''}"
+        if any(p.search(hay) for p in pats):
+            out.append(rec)
+    return out
+
+
 def localname(tag: str) -> str:
     return tag.split("}", 1)[-1] if "}" in tag else tag
 
@@ -523,6 +544,9 @@ def _hf_first_prose(body: str) -> str:
     tables, lists, bare links and `**Field**:` lines are skipped. '' if none."""
     body = re.sub(r"(?s)<!--.*?-->", " ", body or "")
     body = re.sub(r"(?s)```.*?```|~~~.*?~~~", " ", body)     # drop fenced code whole
+    # Model cards embed raw HTML; a <style>/<script> block spans blank lines, so
+    # strip_html alone (per-block) would leave its CSS/JS text as a fake lede.
+    body = re.sub(r"(?is)<(style|script)\b.*?</\1>", " ", body)
     cut = re.search(r"(?im)^[ \t]{0,3}#{2,}[ \t]+\S", body)  # first '## ...' heading
     if cut:
         body = body[:cut.start()]
@@ -1256,13 +1280,16 @@ def run(only: str | None, dry_run: bool) -> None:
             print(f"  skip {src['key']:<22} adapter not wired ({src.get('status')})")
             continue
         try:
-            records = ADAPTERS[src["adapter"]](src)
+            fetched = ADAPTERS[src["adapter"]](src)
+            records = keyword_filter(fetched, src.get("filter_keywords"))
+            dropped = len(fetched) - len(records)
+            note = f" · 滤掉 {dropped}" if dropped else ""
             if dry_run:
-                print(f"  ✓ {src['key']:<22} fetched {len(records):>4} records (dry-run, not saved)")
+                print(f"  ✓ {src['key']:<22} fetched {len(records):>4} records{note} (dry-run, not saved)")
                 continue
             n = save(conn, src, records)
             total_new += n
-            print(f"  ✓ {src['key']:<22} {len(records):>4} fetched · {n:>4} new")
+            print(f"  ✓ {src['key']:<22} {len(records):>4} fetched · {n:>4} new{note}")
         except Exception as exc:  # one bad source never kills the run
             print(f"  ✗ {src['key']:<22} ERROR: {type(exc).__name__}: {exc}")
     if conn is not None:

@@ -79,6 +79,11 @@ def db() -> sqlite3.Connection:
     return conn
 
 
+def has_ai_columns(conn: sqlite3.Connection) -> bool:
+    """旧库可能还没跑过 summarize.py（无 ai_* 列）——查询前探测，别让看板崩。"""
+    return "ai_summary" in {r[1] for r in conn.execute("PRAGMA table_info(items)")}
+
+
 def safe_under(base: Path, candidate: str) -> Path:
     """Resolve `candidate` and guarantee it stays under `base` (no traversal)."""
     p = (ROOT / candidate).resolve() if not Path(candidate).is_absolute() else Path(candidate).resolve()
@@ -129,7 +134,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(self.api_sources())
             if path == "/api/items":
                 return self._json(self.api_items(qs))
+            m = re.match(r"^/api/items/([0-9a-f]{40})$", path)
+            if m:
+                row = self.api_item(m.group(1))
+                return self._json(row) if row is not None else self._err(404, "item not found")
             return self.serve_static(path)
+        except ValueError as exc:
+            return self._err(400, str(exc))
         except FileNotFoundError as exc:
             return self._err(503, str(exc))
         except Exception as exc:
@@ -152,20 +163,50 @@ class Handler(BaseHTTPRequestHandler):
         tiers = conn.execute("SELECT tier, COUNT(*) n FROM items GROUP BY tier").fetchall()
         total = conn.execute("SELECT COUNT(*) n FROM items").fetchone()["n"]
         last = conn.execute("SELECT value FROM meta WHERE key='last_collect'").fetchone()
+        # AI 总结进度：已总结多少、还有多少活跃条目等着总结。
+        # 「待总结」排除 ignored 和 digest:false 的源（那些本来就不进总结队列），
+        # 否则全量跑完后顶栏永远挂着一个还不掉的「待 N」。
+        summarized = unsummarized = None
+        if has_ai_columns(conn):
+            doc = yaml.safe_load(SOURCES_PATH.read_text())
+            skip = [s["key"] for s in doc.get("sources", []) if s.get("digest") is False]
+            not_in = f"AND source_key NOT IN ({','.join('?' * len(skip))})" if skip else ""
+            sm = conn.execute(
+                f"""SELECT
+                      (SELECT COUNT(*) FROM items
+                        WHERE ai_summary IS NOT NULL AND ai_summary != '') s,
+                      (SELECT COUNT(*) FROM items
+                        WHERE (ai_summary IS NULL OR ai_summary = '')
+                          AND status != 'ignored' {not_in}) p""",
+                skip,
+            ).fetchone()
+            summarized, unsummarized = sm["s"] or 0, sm["p"] or 0
         conn.close()
         return {
             "total": total,
             "by_status": {r["status"]: r["n"] for r in rows},
             "by_tier": {r["tier"]: r["n"] for r in tiers},
             "last_collect": last["value"] if last else None,
+            "summarized": summarized,
+            "unsummarized": unsummarized,
         }
 
     def api_sources(self) -> list:
         doc = yaml.safe_load(SOURCES_PATH.read_text())
         return [
-            {k: s.get(k) for k in ("key", "name", "tier", "category", "status", "adapter", "desc")}
+            {k: s.get(k) for k in ("key", "name", "tier", "category", "status", "adapter", "desc", "digest")}
             for s in doc.get("sources", [])
         ]
+
+    def api_item(self, item_id: str):
+        """单条详情（含 content_text 全文）——列表接口为瘦身不带原文，点开时再取。
+        不存在返回 None（上层转 404）。"""
+        conn = db()
+        try:
+            row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
 
     def api_items(self, qs: dict) -> dict:
         def one(name):
@@ -182,26 +223,64 @@ class Handler(BaseHTTPRequestHandler):
             where.append("i.score >= ?"); params.append(int(one("min_score")))
         if one("tag"):
             where.append("i.tags LIKE ?"); params.append(f"%{one('tag')}%")
-        if one("q"):
-            where.append("(i.title LIKE ? OR i.summary LIKE ?)")
-            params += [f"%{one('q')}%", f"%{one('q')}%"]
-        clause = ("WHERE " + " AND ".join(where)) if where else ""
-        sort = {"date": "i.published_at DESC", "score": "i.score DESC",
-                "fetched": "i.fetched_at DESC"}.get(one("sort") or "date", "i.published_at DESC")
+        # limit 在开库前解析：非法参数直接 400/500，不留未关闭的连接
         limit = min(int(one("limit") or 200), 1000)
+        # smart（默认）= 先信号层级（P0 官方 > P1 专家 > P2 > heat），同级新的在上；
+        # digest:false 的 firehose 源（如 SEC 全量申报流水）整体沉底——它们
+        # 「信息密度太低」的判断对排序同样成立。否则分钟级滚动源永远压在官方源上面。
+        # 日期键用 COALESCE(published_at, fetched_at)：ossinsight 等无日期源
+        # 按抓取时间入流，而不是永久沉底不可见；末尾 i.id 让同时间戳（arxiv
+        # 同日批量）排序稳定，刷新不跳动。
+        rank = "CASE i.tier WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'heat' THEN 3 ELSE 9 END"
+        when = "COALESCE(i.published_at, i.fetched_at) DESC"
+        order_params: list = []
+        demote = ""
+        chosen = one("sort") or "smart"
+        if chosen == "smart":
+            doc = yaml.safe_load(SOURCES_PATH.read_text())
+            skip = [s["key"] for s in doc.get("sources", []) if s.get("digest") is False]
+            if skip:
+                demote = f"CASE WHEN i.source_key IN ({','.join('?' * len(skip))}) THEN 1 ELSE 0 END, "
+                order_params = skip
+        sort_map = {
+            "smart": f"{demote}{rank}, {when}",
+            "date": when,
+            "score": "(i.score IS NULL), i.score DESC",
+            "fetched": "i.fetched_at DESC",
+        }
+        order = sort_map.get(chosen, sort_map["smart"]) + ", i.id"
 
         conn = db()
-        rows = conn.execute(
-            f"""SELECT i.*, COUNT(t.id) AS thread_count, MAX(t.path) AS last_thread
-                FROM items i LEFT JOIN threads t ON t.item_id = i.id
-                {clause}
-                GROUP BY i.id
-                ORDER BY (i.published_at IS NULL), {sort}
-                LIMIT ?""",
-            (*params, limit),
-        ).fetchall()
-        conn.close()
-        return {"items": [dict(r) for r in rows], "count": len(rows)}
+        try:
+            if one("q"):
+                q = f"%{one('q')}%"
+                if has_ai_columns(conn):
+                    # 中文搜索主要命中 ai_summary（标题/原始摘要多为英文）
+                    where.append("(i.title LIKE ? OR i.summary LIKE ? OR COALESCE(i.ai_summary,'') LIKE ?)")
+                    params += [q, q, q]
+                else:
+                    where.append("(i.title LIKE ? OR i.summary LIKE ?)")
+                    params += [q, q]
+            clause = ("WHERE " + " AND ".join(where)) if where else ""
+            rows = conn.execute(
+                f"""SELECT i.*, COUNT(t.id) AS thread_count, MAX(t.path) AS last_thread
+                    FROM items i LEFT JOIN threads t ON t.item_id = i.id
+                    {clause}
+                    GROUP BY i.id
+                    ORDER BY {order}
+                    LIMIT ?""",
+                (*params, *order_params, limit),
+            ).fetchall()
+        finally:
+            conn.close()
+        # 列表瘦身：content_text 可达 8KB/条，全量返回会让列表响应膨胀到 MB 级。
+        # 用 has_content 占位，详情点开时走 GET /api/items/<id> 取全文。
+        items = []
+        for r in rows:
+            d = dict(r)
+            d["has_content"] = bool((d.pop("content_text", None) or "").strip())
+            items.append(d)
+        return {"items": items, "count": len(items)}
 
     # -- POST ---------------------------------------------------------------
     def do_POST(self):

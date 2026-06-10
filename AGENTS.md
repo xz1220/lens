@@ -1,6 +1,6 @@
-# CLAUDE.md — lens
+# AGENTS.md — lens
 
-给在 `lens` 项目里工作的 Claude Code / Codex 的操作手册。**先读这个文件。**
+给在 `lens` 项目里工作的 Codex / Claude Code 的操作手册。**先读这个文件。**
 
 ## 这是什么
 

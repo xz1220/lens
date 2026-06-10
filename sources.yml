@@ -129,7 +129,10 @@ sources:
     method: atom
     adapter: generic_feed
     status: ok
-    notes: 官方 Atom（覆盖 changelog）。需过滤非 AI 平台消息。
+    filter_keywords: [ai, llm, llms, model, models, agent, agents, gpt, claude, gemini,
+                      grok, openai, anthropic, xai, copilot, v0, sdk, inference,
+                      embedding, embeddings, rag, prompt, prompts, chatbot, mcp]
+    notes: 官方 Atom（覆盖 changelog）。混源——大部分是非 AI 平台消息，靠 filter_keywords（词边界匹配标题+摘要）只留 AI 相关；历史噪声已一次性清理（2026-06-10）。
 
   - key: perplexity-changelog
     name: Perplexity Changelog
@@ -189,7 +192,8 @@ sources:
     adapter: generic_feed
     status: ok
     ua: "lens-intake research <set-your-contact@example.com>"
-    notes: 文档曾记 403——其实只要带合规 UA 即通，实测 40 条 entry。Form D 同理。
+    digest: false
+    notes: 文档曾记 403——其实只要带合规 UA 即通，实测 40 条 entry。Form D 同理。全量申报流水（多为 Form 4 持股变动），信息密度太低，不值得花 LLM 总结（已标 digest=false）；定向 AI filing 看 sec-edgar-api。
 
   # ---------- P1: expert-owned signal ----------
   - key: simon-willison
@@ -313,7 +317,12 @@ sources:
     method: json
     adapter: hn_algolia
     status: ok
-    notes: HN 讨论热度，回链到原始 URL/repo/paper。不是事实源。
+    filter_keywords: [ai, agi, llm, llms, gpt, chatgpt, claude, gemini, grok, openai,
+                      anthropic, deepseek, mistral, llama, qwen, agent, agents, agentic,
+                      model, models, transformer, transformers, neural, rag, copilot,
+                      diffusion, embedding, embeddings, inference, fine-tuning, finetune,
+                      cuda, pytorch, tensorflow, mcp]
+    notes: HN 讨论热度，回链到原始 URL/repo/paper。不是事实源。search_by_date 是全站最新帖（不限 AI），靠 filter_keywords 词边界过滤只留 AI 相关，否则杂帖按时间排序会霸占 feed 顶部；历史杂帖已一次性清理（2026-06-10）。
 
   - key: hf-models
     name: Hugging Face 热门模型
@@ -342,7 +351,7 @@ sources:
       - vllm-project/vllm
       - huggingface/transformers
       - langchain-ai/langchain
-    notes: 只盯已知 repo 的发版；发现新 repo 用 ossinsight。watchlist 是高信号 AI repo，按需增删。
+    notes: 只盯已知 repo 的发版；发现新 repo 用 ossinsight。watchlist 是高信号 AI repo，按需增删。已知噪声：llama.cpp 每个 nightly 构建（bXXXX）都是一个 release，会刷屏——嫌吵可把它移出 watchlist。
 
   - key: ossinsight-trending
     name: GitHub Trending (OSSInsight)
