@@ -1,7 +1,6 @@
 # lens
 
-![license](https://img.shields.io/badge/license-MIT-6a7a72) ![python](https://img.shields.io/badge/python-3.10%2B-6a7a72) ![deps](https://img.shields.io/badge/deps-PyYAML%20only-6a7a72)
-<!-- push 到 GitHub 后补 CI 徽章：https://github.com/<owner>/lens/actions/workflows/test.yml/badge.svg -->
+![tests](https://github.com/xz1220/lens/actions/workflows/test.yml/badge.svg) ![license](https://img.shields.io/badge/license-MIT-6a7a72) ![python](https://img.shields.io/badge/python-3.10%2B-6a7a72) ![deps](https://img.shields.io/badge/deps-PyYAML%20only-6a7a72)
 
 一个**个人 AI 信息工作台**：从你关注的一手信息源采集 → LLM 产出忠实的中文摘要 →
 看板上键盘流快速评判 → 一键生成讨论稿拖给 Codex / Claude 发散 → 思考沉淀回 markdown。
@@ -15,7 +14,7 @@
 ## 30 秒看到效果（不采集、不跑 LLM）
 
 ```bash
-git clone <repo> && cd lens
+git clone https://github.com/xz1220/lens.git && cd lens
 pip install -r requirements.txt        # 只有 PyYAML
 python3 server.py --demo --open        # 示例数据看板，离线可用（断网时字体自动降级）
 ```
@@ -49,6 +48,43 @@ collect ─→ digest ─→ triage ─→ discuss ─→ capture ─→ ideate
  采集       AI中文      打分/标     生成 prompt   回填讨论     记灵感
             摘要整理    状态/评论   拖进 AI 聊    /过程思考    /丢 inbox
 ```
+
+## 架构
+
+标准的前后端分离：后端拆成**生产链路**（写库）和**消费链路**（读库 + 接收你的评判），
+前端是纯静态页面，只通过 JSON 接口拿数据。
+
+```
+─── 生产链路（批处理，可手动可 cron）──────────┐
+                                              │
+  31 个一手源 ──→ collect.py ──→ summarize.py │
+                  抓取→解析→清洗   抓原文→LLM   │
+                  INSERT OR IGNORE 中文总结，   │
+                  入库（幂等）     只写 ai_* 列  │
+                        │             │        │
+                        ▼             ▼        │
+                 ┌─────────────────────┐       │
+                 │ SQLite data/lens.db │       │
+                 └─────────────────────┘       │
+                        ▲                      │
+─── 消费链路 ───────────┼──────────────────────┘
+                        │
+   web/ 纯静态前端 ⇄ server.py（标准库 HTTP）
+   fetch /api/*      读接口：stats / sources / items
+   渲染三栏看板       写接口：triage / 讨论 / 回填 / 灵感
+                        │
+                        ▼
+              data/discussions/ + data/ideas/（markdown 沉淀层，不进 DB）
+```
+
+- **生产链路**：`collect.py` 一个 adapter 一种源形态（RSS/Atom/JSON API/HTML），
+  fetch 与 parse 分离（parse 是可脱网单测的纯函数）；`summarize.py` 是清洗后的
+  AI 加工段。两个都是幂等批处理命令，重跑绝不覆盖你的评判。
+- **消费链路**：`server.py` 只暴露 JSON 接口；它顺手托管 `web/` 静态文件是为了
+  部署零依赖，逻辑边界仍然是 `/api/*`。
+- **前端**：无框架、无构建步骤的 HTML/CSS/JS，换成任何别的前端只要会 fetch 就行。
+- **第三层**：讨论和灵感故意落 markdown 文件而不进 DB（人读、git 友好），
+  详见 `docs/VISION.md` 的数据模型。
 
 ## 键盘流（按 `?` 随时速查）
 

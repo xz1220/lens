@@ -122,9 +122,9 @@ digest:false 沉底）；列表瘦身 + 单条懒加载。
 
 ## 下一步
 
-管线、看板、开源就绪都已落地，等用户日常使用后的下一轮反馈。
-可能的方向（先别自作主张做）：
-- push 到 GitHub（补 CI 徽章的 owner/repo）+ 定 P 优先级挂进 life-os projects 索引
+管线、看板、开源就绪都已落地，已推送公开仓库 github.com/xz1220/lens（CI 徽章已接）。
+等用户日常使用后的下一轮反馈。可能的方向（先别自作主张做）：
+- 定 P 优先级挂进 life-os projects 索引
 - 总结的定时化（cron 跑 collect + summarize）
 - feed 按天分组（smart 排序已有）
 - 讨论集成从「手动 prompt」升级（见 docs/VISION.md）
