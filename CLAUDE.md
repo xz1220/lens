@@ -66,6 +66,20 @@ UPDATE 回填）+ `server.py`（标准库 http 看板 + 全部写接口 + `--dem
 - **降级源不要追**：`gemini-changelog` / `meta-ai-blog` / `perplexity-changelog` 当前抓不到
   （OAuth / 400 / Cloudflare），`status: blocked`，已和用户确认**不追替代方案**，别浪费力气。
 
+## 当前进展（2026-06-21，看板重设计已定稿、待落地）
+
+看板做了一轮重设计。**设计稿在 Figma**（file key `S353BOFNmpDITsfQLH6NY0`，两个画板：选中态 + 默认空态），
+**PRD 与技术方案在飞书 wiki 空间「lens」**（按 life-os 的《飞书文档写作规范》写、流程转 mermaid 画板）：
+- PRD（内嵌 2 张 Figma 截图）：https://enbmphajlu.feishu.cn/wiki/CmZGwQdjLiCb6VkdKHVcMWXJnkb
+- 技术方案：https://enbmphajlu.feishu.cn/wiki/VfY7wqwOTiTKY7kdP8wcHkSwnyd
+
+**这是已定稿的方向，前端尚未实现** —— `web/` 仍是旧的三栏 + 0–5 评分版，下一步 design→code 落地。
+新设计要点（决策见 `docs/DECISIONS.md` D16–D20）：
+- 布局：顶部状态条幅 + 一排 3 个分类 Tab（产品 / 技术 / 其他）+ 两栏（左信息流、右详情，默认空、点开才显示）。不再是三栏。
+- 评判：**去掉 0–5 评分**，改二分「值得关注 / 不值得关注」+ 批注。复用现有四枚举：值得关注=`promoted`、不值得关注=`ignored`、未读=`captured`、看过没表态=`reviewed`；`score` 列保留兼容但 UI 不用。不造新枚举。
+- 信息流：严格按 `published_at` 倒序；「已读/未读」与「值得关注」两套视觉信号分离（明暗轴管读没读、雾青 accent 独占「我的判断」）；未总结条目「待总结」一等态。
+- 右栏分阅读区 / 行动区；行动区 = 二分评判 + 批注 + 「讨论与沉淀」区块（生成讨论稿 + 已沉淀讨论列表）。
+
 ## 当前状态（截至 2026-06-11，开源就绪 + 日常易用性）
 
 ✅ 2026-06-11 双定位整改（用户定调：个人日常工具 + 开源 AI 项目，Codex 评审采纳大半）：
@@ -122,10 +136,12 @@ digest:false 沉底）；列表瘦身 + 单条懒加载。
 
 ## 下一步
 
-管线、看板、开源就绪都已落地，已推送公开仓库 github.com/xz1220/lens（CI 徽章已接）。
-等用户日常使用后的下一轮反馈。可能的方向（先别自作主张做）：
+**优先：照 Figma 把 `web/` 前端落地成新设计**（design→code，原生 HTML/CSS/JS、墨色冷调延续；
+见上「当前进展」+ `docs/DECISIONS.md` D16–D20）。落地时后端配合的小改：列表按 `published_at`
+倒序、二分标记走现有 `status` 写接口、顶部条幅计数走 `/api/stats`、类型（产品/技术/其他）归类规则待定。
+
+其余可能方向（先别自作主张做）：
 - 定 P 优先级挂进 life-os projects 索引
 - 总结的定时化（cron 跑 collect + summarize）
-- feed 按天分组（smart 排序已有）
 - 讨论集成从「手动 prompt」升级（见 docs/VISION.md）
 - schema 迁移制度化（meta.schema_version + migrate.py，Codex 建议，暂用 ALTER 方案够用）
